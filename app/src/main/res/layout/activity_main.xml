@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp">
+
+    <!-- Logo / 标题 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="左右"
+        android:textSize="48sp"
+        android:textStyle="bold"
+        android:textColor="#FF6200"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="AI 陪看助手"
+        android:textSize="18sp"
+        android:textColor="#666666"
+        android:layout_marginBottom="48dp" />
+
+    <!-- 状态显示 -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="状态：未开启服务"
+        android:textSize="16sp"
+        android:layout_marginBottom="32dp" />
+
+    <!-- 开启按钮 -->
+    <Button
+        android:id="@+id/toggleButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="开启无障碍服务"
+        android:textSize="16sp"
+        android:backgroundTint="#FF6200" />
+
+    <!-- 说明文字 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出"
+        android:textSize="14sp"
+        android:textColor="#999999"
+        android:lineSpacingMultiplier="1.5"
+        android:layout_marginTop="48dp" />
+
+</LinearLayout>
