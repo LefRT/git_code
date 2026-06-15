@@ -24,28 +24,30 @@ public class DouyinCommentService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
 
-        // 只处理抖音的事件
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
         if (!packageName.equals(DOUYIN_PACKAGE)) return;
 
-        Log.d(TAG, "收到抖音事件: " + event.getEventType());
-
-        // 获取当前窗口的根节点
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode == null) return;
 
-        // 提取评论
-        List<Comment> comments = extractComments(rootNode);
+        CharSequence rootPkg = rootNode.getPackageName();
+        if (rootPkg == null || !rootPkg.toString().equals(DOUYIN_PACKAGE)) {
+            rootNode.recycle();
+            return;
+        }
+
+        List<Comment> comments = new ArrayList<>();
+        collectCommentsRecursive(rootNode, comments);
+        rootNode.recycle();
 
         if (!comments.isEmpty()) {
-            // 输出 JSON
             String json = buildJson(comments);
             Log.d(TAG, "=== 评论 JSON ===");
             Log.d(TAG, json);
             Log.d(TAG, "================");
+        } else {
+            Log.d(TAG, "未提取到评论，可能需要调整解析逻辑");
         }
-
-        rootNode.recycle();
     }
 
     @Override
@@ -54,87 +56,66 @@ public class DouyinCommentService extends AccessibilityService {
     }
 
     /**
-     * 从节点树中提取评论
+     * 递归遍历节点树，找到每条评论的 FrameLayout，
+     * 从 contentDescription 提取用户/内容，从子节点提取点赞数。
      */
-    private List<Comment> extractComments(AccessibilityNodeInfo rootNode) {
-        List<Comment> comments = new ArrayList<>();
-
-        // 查找评论列表（通常是 RecyclerView）
-        List<AccessibilityNodeInfo> recyclerViews = findNodesByClassName(rootNode, "androidx.recyclerview.widget.RecyclerView");
-
-        for (AccessibilityNodeInfo recyclerView : recyclerViews) {
-            // 遍历列表项
-            for (int i = 0; i < recyclerView.getChildCount(); i++) {
-                AccessibilityNodeInfo item = recyclerView.getChild(i);
-                if (item != null) {
-                    Comment comment = parseCommentItem(item);
-                    if (comment != null && comment.text != null && !comment.text.isEmpty()) {
-                        comments.add(comment);
-                    }
-                    item.recycle();
-                }
-            }
-        }
-
-        return comments;
-    }
-
-    /**
-     * 解析单条评论
-     */
-    private Comment parseCommentItem(AccessibilityNodeInfo item) {
-        Comment comment = new Comment();
-
-        // 获取所有 TextView
-        List<AccessibilityNodeInfo> textViews = findNodesByClassName(item, "android.widget.TextView");
-
-        for (int i = 0; i < textViews.size(); i++) {
-            AccessibilityNodeInfo textView = textViews.get(i);
-            String text = textView.getText() != null ? textView.getText().toString() : "";
-
-            if (text.isEmpty()) continue;
-
-            // 简单策略：第一个非空文本作为用户名，第二个作为评论内容
-            if (comment.user == null) {
-                comment.user = text;
-            } else if (comment.text == null) {
-                comment.text = text;
-            }
-
-            textView.recycle();
-        }
-
-        return comment;
-    }
-
-    /**
-     * 查找指定类名的节点
-     */
-    private List<AccessibilityNodeInfo> findNodesByClassName(AccessibilityNodeInfo root, String className) {
-        List<AccessibilityNodeInfo> result = new ArrayList<>();
-        findNodesRecursive(root, className, result);
-        return result;
-    }
-
-    private void findNodesRecursive(AccessibilityNodeInfo node, String className, List<AccessibilityNodeInfo> result) {
+    private void collectCommentsRecursive(AccessibilityNodeInfo node, List<Comment> comments) {
         if (node == null) return;
 
-        if (className.equals(node.getClassName())) {
-            result.add(AccessibilityNodeInfo.obtain(node));
+        CharSequence desc = node.getContentDescription();
+        if (desc != null && desc.toString().contains("回复 按钮")) {
+            Comment partial = CommentParser.parseFromDescription(desc.toString());
+            if (partial != null) {
+                // 在同个节点内找点赞数
+                // 注意：只搜索，不回收子节点（统一由 collectCommentsRecursive 的循环回收）
+                partial.likeCount = findLikeCount(node);
+                comments.add(partial);
+            }
         }
 
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
-                findNodesRecursive(child, className, result);
+                collectCommentsRecursive(child, comments);
                 child.recycle();
             }
         }
     }
 
     /**
-     * 构建 JSON 输出
+     * 在评论节点内查找点赞数。
+     * 只读不回收——子节点的回收由 collectCommentsRecursive 统一处理。
      */
+    private int findLikeCount(AccessibilityNodeInfo node) {
+        if (node == null) return 0;
+
+        String text = node.getText() != null ? node.getText().toString().trim() : "";
+        if (text.matches("\\d{1,6}")) {
+            AccessibilityNodeInfo parent = node.getParent();
+            if (parent != null) {
+                CharSequence parentDesc = parent.getContentDescription();
+                if (parentDesc != null && parentDesc.toString().contains("赞")) {
+                    try {
+                        return Integer.parseInt(text);
+                    } catch (NumberFormatException e) {
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                int found = findLikeCount(child);
+                // 注意：不回收 child，统一由 collectCommentsRecursive 处理
+                if (found > 0) return found;
+            }
+        }
+
+        return 0;
+    }
+
     private String buildJson(List<Comment> comments) {
         try {
             JSONObject json = new JSONObject();
@@ -145,24 +126,17 @@ public class DouyinCommentService extends AccessibilityService {
             JSONArray commentArray = new JSONArray();
             for (Comment comment : comments) {
                 JSONObject commentJson = new JSONObject();
-                commentJson.put("user", comment.user);
-                commentJson.put("text", comment.text);
+                commentJson.put("user", comment.user != null ? comment.user : "");
+                commentJson.put("text", comment.text != null ? comment.text : "");
+                commentJson.put("likes", comment.likeCount);
                 commentArray.put(commentJson);
             }
             json.put("comments", commentArray);
 
-            return json.toString(2); // 格式化输出
+            return json.toString(2);
         } catch (JSONException e) {
             Log.e(TAG, "JSON 构建失败", e);
             return "{}";
         }
-    }
-
-    /**
-     * 评论数据类
-     */
-    private static class Comment {
-        String user;
-        String text;
     }
 }

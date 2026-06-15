@@ -24,14 +24,9 @@ public class MainActivity extends AppCompatActivity {
         toggleButton = findViewById(R.id.toggleButton);
 
         toggleButton.setOnClickListener(v -> {
-            if (!isAccessibilityServiceEnabled()) {
-                // 引导用户开启无障碍服务
-                Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_LONG).show();
-                Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-                startActivity(intent);
-            } else {
-                Toast.makeText(this, "无障碍服务已开启，正在监听抖音", Toast.LENGTH_SHORT).show();
-            }
+            // 跳转到无障碍设置页，用户可以在那里开关服务
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
         });
     }
 
