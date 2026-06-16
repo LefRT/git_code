@@ -33,20 +33,30 @@
         android:textSize="16sp"
         android:layout_marginBottom="32dp" />
 
-    <!-- 开启按钮 -->
+    <!-- 无障碍服务按钮 -->
     <Button
-        android:id="@+id/toggleButton"
+        android:id="@+id/accessibilityButton"
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:text="开启无障碍服务"
         android:textSize="16sp"
         android:backgroundTint="#FF6200" />
 
+    <!-- 屏幕捕获按钮 -->
+    <Button
+        android:id="@+id/screenCaptureButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="开启屏幕捕获"
+        android:textSize="16sp"
+        android:backgroundTint="#2196F3"
+        android:layout_marginTop="16dp" />
+
     <!-- 说明文字 -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出"
+        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出\n4. 「屏幕捕获」需授权才能捕获视频画面"
         android:textSize="14sp"
         android:textColor="#999999"
         android:lineSpacingMultiplier="1.5"
