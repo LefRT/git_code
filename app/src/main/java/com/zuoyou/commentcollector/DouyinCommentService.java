@@ -5,20 +5,76 @@ import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 
+/**
+ * Phase 1 核心：抖音评论提取服务。
+ *
+ * 通过 Android AccessibilityService 监听抖音窗口变化，
+ * 遍历节点树提取评论区的用户、内容、点赞数、时间和位置，
+ * 输出结构化 JSON 到 Logcat。
+ *
+ * 节点遍历和 JSON 构建委托给 {@link CommentCollector}。
+ */
 public class DouyinCommentService extends AccessibilityService {
 
     private static final String TAG = "DouyinComment";
     private static final String DOUYIN_PACKAGE = "com.ss.android.ugc.aweme";
+
+    /** 同类型事件的最小处理间隔（毫秒），防抖用 */
+    private static final long MIN_EVENT_INTERVAL_MS = 500;
+
+    /** 最近一次处理事件的时间戳 */
+    private long lastProcessedTime = 0;
+
+    /**
+     * 已提取评论的去重缓存（自动淘汰最旧条目）。
+     * key = "user|text"，超过 100 条自动移除最旧的。
+     */
+    private final LinkedHashMap<String, Boolean> recentComments = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+            return size() > 100;
+        }
+    };
+
+    private CommentCollector collector;
+    private ContextBuilder contextBuilder;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        // 创建 Context Builder（Phase 3 数据管道）
+        contextBuilder = new ContextBuilder();
+        contextBuilder.setListener(context -> {
+            // Phase 4 入口：在此处将 context 传递给 AI 处理管线
+            // 当前仅 Logcat 输出，由 ContextBuilder 内部完成
+        });
+
+        // 注入到 ScreenCaptureService，使其能推送截图事件
+        ScreenCaptureService.setContextBuilder(contextBuilder);
+
+        // 创建评论收集器，通过 Listener 接收最新评论
+        collector = new CommentCollector(comments -> {
+            // 去重过滤：跳过已提取过的评论
+            List<Comment> freshComments = new ArrayList<>();
+            for (Comment c : comments) {
+                String key = c.user() + "|" + c.text();
+                if (!recentComments.containsKey(key)) {
+                    recentComments.put(key, Boolean.TRUE);
+                    freshComments.add(c);
+                }
+            }
+            // 将新评论推入 Context Builder
+            if (!freshComments.isEmpty()) {
+                contextBuilder.pushComments(freshComments);
+            }
+        });
+    }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -26,6 +82,13 @@ public class DouyinCommentService extends AccessibilityService {
 
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
         if (!packageName.equals(DOUYIN_PACKAGE)) return;
+
+        // 事件防抖：TYPE_WINDOW_CONTENT_CHANGED 频率极高，500ms 内跳过
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            long now = System.currentTimeMillis();
+            if (now - lastProcessedTime < MIN_EVENT_INTERVAL_MS) return;
+            lastProcessedTime = now;
+        }
 
         AccessibilityNodeInfo rootNode = getRootInActiveWindow();
         if (rootNode == null) return;
@@ -36,107 +99,13 @@ public class DouyinCommentService extends AccessibilityService {
             return;
         }
 
-        List<Comment> comments = new ArrayList<>();
-        collectCommentsRecursive(rootNode, comments);
+        // 委托 CommentCollector 完成节点遍历、解析、JSON 输出
+        collector.collect(rootNode);
         rootNode.recycle();
-
-        if (!comments.isEmpty()) {
-            String json = buildJson(comments);
-            Log.d(TAG, "=== 评论 JSON ===");
-            Log.d(TAG, json);
-            Log.d(TAG, "================");
-        } else {
-            Log.d(TAG, "未提取到评论，可能需要调整解析逻辑");
-        }
     }
 
     @Override
     public void onInterrupt() {
         Log.w(TAG, "无障碍服务被中断");
-    }
-
-    /**
-     * 递归遍历节点树，找到每条评论的 FrameLayout，
-     * 从 contentDescription 提取用户/内容，从子节点提取点赞数。
-     */
-    private void collectCommentsRecursive(AccessibilityNodeInfo node, List<Comment> comments) {
-        if (node == null) return;
-
-        CharSequence desc = node.getContentDescription();
-        if (desc != null && desc.toString().contains("回复 按钮")) {
-            Comment partial = CommentParser.parseFromDescription(desc.toString());
-            if (partial != null) {
-                // 在同个节点内找点赞数
-                // 注意：只搜索，不回收子节点（统一由 collectCommentsRecursive 的循环回收）
-                partial.likeCount = findLikeCount(node);
-                comments.add(partial);
-            }
-        }
-
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) {
-                collectCommentsRecursive(child, comments);
-                child.recycle();
-            }
-        }
-    }
-
-    /**
-     * 在评论节点内查找点赞数。
-     * 只读不回收——子节点的回收由 collectCommentsRecursive 统一处理。
-     */
-    private int findLikeCount(AccessibilityNodeInfo node) {
-        if (node == null) return 0;
-
-        String text = node.getText() != null ? node.getText().toString().trim() : "";
-        if (text.matches("\\d{1,6}")) {
-            AccessibilityNodeInfo parent = node.getParent();
-            if (parent != null) {
-                CharSequence parentDesc = parent.getContentDescription();
-                if (parentDesc != null && parentDesc.toString().contains("赞")) {
-                    try {
-                        return Integer.parseInt(text);
-                    } catch (NumberFormatException e) {
-                        return 0;
-                    }
-                }
-            }
-        }
-
-        for (int i = 0; i < node.getChildCount(); i++) {
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) {
-                int found = findLikeCount(child);
-                // 注意：不回收 child，统一由 collectCommentsRecursive 处理
-                if (found > 0) return found;
-            }
-        }
-
-        return 0;
-    }
-
-    private String buildJson(List<Comment> comments) {
-        try {
-            JSONObject json = new JSONObject();
-            json.put("app", "抖音");
-            json.put("timestamp", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.CHINA).format(new Date()));
-            json.put("comment_count", comments.size());
-
-            JSONArray commentArray = new JSONArray();
-            for (Comment comment : comments) {
-                JSONObject commentJson = new JSONObject();
-                commentJson.put("user", comment.user != null ? comment.user : "");
-                commentJson.put("text", comment.text != null ? comment.text : "");
-                commentJson.put("likes", comment.likeCount);
-                commentArray.put(commentJson);
-            }
-            json.put("comments", commentArray);
-
-            return json.toString(2);
-        } catch (JSONException e) {
-            Log.e(TAG, "JSON 构建失败", e);
-            return "{}";
-        }
     }
 }

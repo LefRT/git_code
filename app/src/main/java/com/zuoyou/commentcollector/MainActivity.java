@@ -23,6 +23,15 @@ public class MainActivity extends AppCompatActivity {
     private boolean isServiceRunning = false;
 
     /**
+     * Android 13+ 通知权限请求（前台服务必需）。
+     */
+    private final ActivityResultLauncher<String> notificationPermissionLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.RequestPermission(),
+                    granted -> { /* 通知权限结果已由系统 Toast 提示 */ }
+            );
+
+    /**
      * 屏幕捕获授权回调：用户确认授权后启动 ScreenCaptureService。
      */
     private final ActivityResultLauncher<Intent> screenCaptureLauncher =
@@ -141,9 +150,7 @@ public class MainActivity extends AppCompatActivity {
      */
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(
-                    new String[]{ Manifest.permission.POST_NOTIFICATIONS },
-                    1002);
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
         }
     }
 }

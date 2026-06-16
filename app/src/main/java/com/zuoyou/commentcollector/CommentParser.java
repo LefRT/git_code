@@ -39,6 +39,7 @@ public class CommentParser {
             String body = desc.substring(0, desc.length() - "回复 按钮,".length()).trim();
             if (body.endsWith(",")) body = body.substring(0, body.length() - 1).trim();
 
+            // 在后 2/3 区域搜索时间戳（避免用户名中的数字干扰）
             int searchStart = body.length() / 3;
             String searchRegion = body.substring(searchStart);
 
@@ -51,6 +52,8 @@ public class CommentParser {
             if (relativeStart < 0) return null;
 
             int timeStart = searchStart + relativeStart;
+
+            // 解析用户名 + 评论内容（时间戳之前的部分）
             String userAndText = body.substring(0, timeStart).trim();
             if (userAndText.endsWith(",")) userAndText = userAndText.substring(0, userAndText.length() - 1).trim();
 
@@ -66,7 +69,17 @@ public class CommentParser {
             }
 
             if (user.isEmpty()) return null;
-            return new Comment(user, text);
+
+            // 解析时间 + 位置（时间戳之后的部分）
+            String timeAndLocation = body.substring(timeStart).trim();
+            if (timeAndLocation.endsWith(",")) {
+                timeAndLocation = timeAndLocation.substring(0, timeAndLocation.length() - 1).trim();
+            }
+            String[] tlParts = timeAndLocation.split(",", 2);
+            String time = tlParts[0].trim();
+            String location = tlParts.length > 1 ? tlParts[1].trim() : "";
+
+            return new Comment(user, text, 0, time, location);
 
         } catch (Exception e) {
             return null;

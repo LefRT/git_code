@@ -1,28 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
     android:padding="32dp">
 
     <!-- Logo / 标题 -->
     <TextView
+        android:id="@+id/titleText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="左右"
+        android:text="@string/app_name"
         android:textSize="48sp"
         android:textStyle="bold"
-        android:textColor="#FF6200"
-        android:layout_marginBottom="8dp" />
+        android:textColor="@color/orange_primary"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        android:layout_marginTop="48dp" />
 
     <TextView
+        android:id="@+id/subtitleText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="AI 陪看助手"
         android:textSize="18sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="48dp" />
+        android:textColor="@color/text_secondary"
+        android:layout_marginTop="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/titleText" />
+
+    <!-- 分隔线 -->
+    <View
+        android:id="@+id/divider"
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:background="?android:attr/listDivider"
+        android:layout_marginTop="40dp"
+        android:layout_marginBottom="32dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/subtitleText" />
 
     <!-- 状态显示 -->
     <TextView
@@ -31,35 +50,56 @@
         android:layout_height="wrap_content"
         android:text="状态：未开启服务"
         android:textSize="16sp"
-        android:layout_marginBottom="32dp" />
+        android:textColor="?android:attr/textColorSecondary"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/divider" />
 
     <!-- 无障碍服务按钮 -->
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/accessibilityButton"
-        android:layout_width="match_parent"
+        style="@style/Widget.MaterialComponents.Button"
+        android:layout_width="0dp"
         android:layout_height="56dp"
         android:text="开启无障碍服务"
         android:textSize="16sp"
-        android:backgroundTint="#FF6200" />
+        android:textColor="@android:color/white"
+        app:backgroundTint="@color/orange_primary"
+        android:layout_marginTop="24dp"
+        app:cornerRadius="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/statusText" />
 
     <!-- 屏幕捕获按钮 -->
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/screenCaptureButton"
-        android:layout_width="match_parent"
+        style="@style/Widget.MaterialComponents.Button"
+        android:layout_width="0dp"
         android:layout_height="56dp"
         android:text="开启屏幕捕获"
         android:textSize="16sp"
-        android:backgroundTint="#2196F3"
-        android:layout_marginTop="16dp" />
+        android:textColor="@android:color/white"
+        app:backgroundTint="@color/blue_primary"
+        android:layout_marginTop="16dp"
+        app:cornerRadius="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/accessibilityButton" />
 
-    <!-- 说明文字 -->
+    <!-- 使用说明 -->
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/instructionText"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出\n4. 「屏幕捕获」需授权才能捕获视频画面"
         android:textSize="14sp"
-        android:textColor="#999999"
-        android:lineSpacingMultiplier="1.5"
-        android:layout_marginTop="48dp" />
+        android:textColor="@color/text_hint"
+        android:lineSpacingMultiplier="1.6"
+        android:layout_marginTop="48dp"
+        android:gravity="start"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/screenCaptureButton" />
 
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

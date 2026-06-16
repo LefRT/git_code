@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主色取自 theme.xml colorPrimary -->
+    <color name="orange_primary">#FF6200</color>
+    <color name="orange_light">#FF8533</color>
+    <color name="blue_primary">#2196F3</color>
+
+    <!-- 文字色 -->
+    <color name="text_secondary">#666666</color>
+    <color name="text_hint">#999999</color>
+
+    <!-- 功能色 -->
+    <color name="success_green">#4CAF50</color>
+</resources>

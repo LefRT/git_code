@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**左右 (ZuoYou)** — an Android app that gives AI a physical embodiment. Phase 1 focuses on building the "AI companion watching" experience: an app that uses Android AccessibilityService to extract content from Douyin (抖音) in real-time, which will later feed into an AI personality system.
+**左右 (ZuoYou)** — an Android app that gives AI a physical embodiment. The app uses Android AccessibilityService to extract content from Douyin (抖音) in real-time and MediaProjection to capture screen frames, fused into a structured context for downstream AI processing.
 
 The ultimate vision: a physical desktop robot (ESP32-S3 + LCD + servo) that reacts to what the user is watching with expressions, comments, and movements.
 
@@ -23,8 +23,14 @@ The ultimate vision: a physical desktop robot (ESP32-S3 + LCD + servo) that reac
 # Install on connected device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 
-# View DouyinCommentService Logcat output
+# View comment extraction output
 adb logcat -s DouyinComment
+
+# View screen capture output
+adb logcat -s ScreenCapture
+
+# View fused context (Phase 3)
+adb logcat -s ZuoYouContext
 
 # Clear logcat buffer
 adb logcat -c
@@ -40,41 +46,47 @@ adb devices
 - **AGP**: 8.13.0
 - **compileSdk / targetSdk**: 36
 - **minSdk**: 21
-- **Java**: 1.8 (source & target compatibility)
+- **Java**: 17 (source & target compatibility)
 - **Namespace / applicationId**: `com.zuoyou.commentcollector`
 - **Test framework**: JUnit 4.13 (no tests written yet)
-- **Dependencies**: appcompat 1.6.1, Material 1.11.0, ConstraintLayout 2.1.4 (layout currently uses `LinearLayout` — `activity_main.xml`)
+- **Dependencies**: appcompat 1.6.1, Material 1.11.0, ConstraintLayout 2.1.4
 
 ## Project Files
 
 ```
 app/src/main/java/com/zuoyou/commentcollector/
-├── Comment.java                  # Data class — user, text, likeCount
-├── CommentParser.java            # Pure-Java parser (no Android dependency)
-├── DouyinCommentService.java     # AccessibilityService — Phase 1 core logic
-├── ScreenCaptureService.java     # MediaProjection screen capture — Phase 2
-└── MainActivity.java             # Launcher — service status & enable guide
+├── AppContext.java              # Phase 3 — unified context data record + TimelineEvent
+├── Comment.java                 # Phase 1 — data record (user, text, likeCount, time, location)
+├── CommentCollector.java        # Phase 1 — tree traversal + parsing + JSON (extracted from service)
+├── CommentParser.java           # Phase 1 — pure-Java contentDescription parser
+├── ContextBuilder.java          # Phase 3 — fused pipeline (comments + screenshots + timeline)
+├── DouyinCommentService.java    # Phase 1 — AccessibilityService (now delegates to CommentCollector)
+├── ScreenCaptureService.java    # Phase 2 — MediaProjection screen capture service
+└── MainActivity.java            # Launcher — service status & enable guide
 ```
 
 ## How Comment Extraction Works (current implementation)
 
-1. **`onAccessibilityEvent()`** is triggered by `TYPE_WINDOW_CONTENT_CHANGED` / `TYPE_WINDOW_STATE_CHANGED` events within the Douyin package (`com.ss.android.ugc.aweme`). It gets the root window node, verifies it belongs to Douyin, then delegates to the recursive walker.
+1. **`onAccessibilityEvent()`** is triggered by `TYPE_WINDOW_CONTENT_CHANGED` / `TYPE_WINDOW_STATE_CHANGED` events within the Douyin package (`com.ss.android.ugc.aweme`). It gets the root window node, verifies it belongs to Douyin, then delegates to `CommentCollector.collect()`.
 
-2. **`collectCommentsRecursive()`** walks the AccessibilityNodeInfo tree. It identifies comment items by finding `FrameLayout` nodes whose `contentDescription` contains `"回复 按钮"`. Each child is recycled at the end of its iteration in the `for` loop.
+2. **Event debounce**: `TYPE_WINDOW_CONTENT_CHANGED` events within 500ms of the last processed event are skipped to reduce unnecessary tree walks.
 
-3. **`CommentParser.parseFromDescription()`** parses the `contentDescription` string (format: `user,text,time, · location,回复 按钮,`) by:
+3. **`CommentCollector.collectRecursive()`** walks the AccessibilityNodeInfo tree. It identifies comment items by finding `FrameLayout` nodes whose `contentDescription` contains `"回复 按钮"`. Each child is recycled at the end of its iteration in the `for` loop. The entire traversal is wrapped in try-catch to guard against rare node-recycled exceptions.
+
+4. **`CommentParser.parseFromDescription()`** parses the `contentDescription` string (format: `user,text,time, · location,回复 按钮,`) by:
    - Stripping the trailing `"回复 按钮,"` suffix
    - Searching only the **last 2/3** of the string (`body.length() / 3`) for a timestamp regex — this optimization avoids false matches on usernames containing digit patterns
    - Using the last-found timestamp position as an anchor to split user+text from time+location
    - Splitting on the first comma in the user+text segment to get username and comment text
-   - `Comment` constructor sets `likeCount = 0`; the service fills it in afterward
+   - Further splitting the time+location segment to extract both fields
+   - Returns a `Comment` record (user, text, likeCount=0, time, location)
 
-4. **`findLikeCount()`** uses a dual strategy (comment-based implementation):
-   - **First**: checks if the current node is a `TextView` containing 1–6 digits, and if its parent's `contentDescription` contains `"赞"` (this is the usual case when `collectCommentsRecursive` lands on the comment `FrameLayout` and the like-count `TextView` is itself a direct child in the tree)
-   - **Fallback**: if the direct check fails, recursively searches all child nodes with the same logic
-   - This is **read-only** — never recycles any nodes; recycling is entirely handled by `collectCommentsRecursive`'s loop
+5. **`findLikeCount()`** uses a dual strategy:
+   - **First**: checks if the current node is a `TextView` containing 1–6 digits, and if its parent's `contentDescription` contains `"赞"`
+   - **Fallback**: recursively searches all child nodes with the same logic
+   - This is **read-only** — never recycles any nodes; recycling is entirely handled by `collectRecursive`'s loop
 
-5. **`buildJson()`** outputs structured JSON to Logcat with fields: `app`, `"抖音"`, `timestamp` (ISO 8601: `yyyy-MM-dd'T'HH:mm:ss` with `Locale.CHINA`), `comment_count`, and a `comments` array of `{user, text, likes}`.
+6. **Deduplication**: Extracted comments are deduplicated by `(user, text)` key. A `LinkedHashMap` acts as a sliding window of 100 recent entries, automatically evicting the oldest.
 
 ### Key insights
 
@@ -86,27 +98,41 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 
 The timestamp regex in `CommentParser` is the critical anchor point. Its format includes Chinese-relative times (`昨天HH:mm`, `X分钟前`, `刚刚`) and absolute formats. The search is deliberately scoped to the latter 2/3 of the string to avoid matching digit sequences in usernames.
 
-**Node lifecycle is critical**: `collectCommentsRecursive` recycles its children in the `for` loop. `findLikeCount` is read-only and does NOT recycle. After `collectCommentsRecursive` returns, the root node is recycled by `onAccessibilityEvent`. Never use a node after its `recycle()` call, and never recycle a node twice.
+**Node lifecycle is critical**: `collectRecursive` recycles its children in the `for` loop. `findLikeCount` is read-only and does NOT recycle. After `collectRecursive` returns, the root node is recycled by `onAccessibilityEvent`. Never use a node after its `recycle()` call, and never recycle a node twice.
 
 ## Architecture
 
-### Current State (Phase 1 — content perception layer)
+### Current State (Phase 1-3 — content perception + context fusion)
 
 ```
-┌─────────────────────┐
-│  Douyin App UI      │
-│  (com.ss.android    │
-│   .ugc.aweme)       │
-└────────┬────────────┘
-         │ AccessibilityEvent
-┌────────▼─────────────────────┐
-│ DouyinCommentService         │
-│  collectCommentsRecursive()  │──▶ JSON → Logcat
-│  ─ recursively walks tree    │
-│  ─ finds "回复 按钮" nodes   │
-│  ─ parses desc→user+text     │
-│  ─ finds likeCount from child│
-└──────────────────────────────┘
+┌────────────────────┐     ┌─────────────────────┐
+│  Douyin App UI     │     │     Phone Screen    │
+│  (Accessibility)   │     │  (MediaProjection)  │
+└────────┬───────────┘     └──────────┬──────────┘
+         │ AccessibilityEvent         │ 3s interval
+┌────────▼───────────────────────────▼──────────┐
+│           ContextBuilder (Phase 3)             │
+│  ┌────────────────┐  ┌──────────────────────┐ │
+│  │ CommentCollector│  │ ScreenCaptureService  │ │
+│  │ parse + dedup  │  │ imageToBitmap + save  │ │
+│  └───────┬────────┘  └──────────┬───────────┘ │
+│          │ pushComments()       │ pushScreenshot│
+│  ┌───────▼──────────────────────▼───────────┐ │
+│  │     Ring buffers (in-memory)             │ │
+│  │ ・recentComments (max 20)                │ │
+│  │ ・recentScreenshots (max 5)              │ │
+│  │ ・timeline (max 30 events)               │ │
+│  └───────┬──────────────────────────────────┘ │
+│          │ buildContext()                     │
+│          ▼                                    │
+│     AppContext{                                │
+│       app, timestamp,                         │
+│       comment_count,                          │
+│       recent_comments[],                      │
+│       latest_screenshot,                      │
+│       timeline[]                              │
+│     } → toJson() → Logcat + Phase 4           │
+└───────────────────────────────────────────────┘
 ```
 
 ### Planned Architecture (from README)
@@ -115,8 +141,7 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 ┌─────────────────────┐
 │     Android APP     │
 ├─────────────────────┤
-│ • 内容感知层        │  ← Current: AccessibilityService (text)
-│ • Context Builder   │  ← Planned: fuses text + visual data
+│ • 内容感知层        │  ← Phase 1-3: Accessibility + ScreenCapture + ContextBuilder
 │ • AI 接口层         │  ← Planned: LLM API calls
 │ • 悬浮窗交互        │  ← Planned: overlay UI for AI comments
 └──────────┬──────────┘
@@ -136,9 +161,22 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 |-------|-------|--------|
 | 1 | AccessibilityService → comment extraction with likes | ✅ Done |
 | 2 | MediaProjection (screen capture) | ✅ Done |
-| 3 | Context Builder (fuse text + vision) | ❌ Pending |
-| 4 | AI personality system +悬浮窗 | ❌ Pending |
+| 3 | Context Builder (fuse text + vision via ring buffers) | ✅ Done |
+| 4 | AI personality system + 悬浮窗 | ❌ Pending |
 | 5 | Physical robot (ESP32-S3) | ❌ Pending |
+
+### Optimization history (2026-06-16)
+
+- **Java 8 → 17**: Records, text blocks, switch expressions available
+- **Comment → record**: Immutable, added `time` and `location` fields
+- **Event debounce**: 500ms minimum interval for `TYPE_WINDOW_CONTENT_CHANGED`
+- **Comment dedup**: `LinkedHashMap` sliding window (100 entries)
+- **CommentCollector extraction**: Decoupled tree traversal + JSON from AccessibilityService
+- **Exception safety**: All node traversal wrapped in try-catch
+- **Thread safety**: `isRunning` → `volatile`, synchronized ring buffers
+- **UI**: ConstraintLayout + MaterialButton + colors.xml
+- **API migration**: `requestPermissions()` → `ActivityResultLauncher`
+- **ProGuard**: Rules for JSON/Service/Callback classes
 
 ## AndroidManifest & Permissions
 
@@ -170,7 +208,7 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 | `startCapture()` | 创建 MediaProjection → VirtualDisplay → ImageReader |
 | `captureFrame()` | 每 3 秒调用 `ImageReader.acquireLatestImage()` 获取最新帧 |
 | `imageToBitmap()` | 将 RGBA_8888 Image 转为 ARGB_8888 Bitmap（处理 R/B 通道重排 + row stride padding） |
-| `saveBitmapToCache()` | JPEG 80% 质量写入 `getCacheDir()`，文件名 `capture_yyyyMMdd_HHmmss_SSS.jpg` |
+| `saveBitmapToCache()` | JPEG 80% 质量写入 `getCacheDir()`，文件名 `capture_yyyyMMdd_HHmmss_SSS.jpg`，保存后通知 ContextBuilder |
 | `cleanupOldCaptures()` | 保留最新 50 帧，超出部分自动清理 |
 | `stopCapture()` | 释放 MediaProjection、VirtualDisplay、ImageReader、后台线程 |
 
@@ -182,6 +220,8 @@ MainActivity 通过 Intent Action 控制 ScreenCaptureService：
 
 MediaProjection 权限通过 `ActivityResultLauncher<Intent>` 在 MainActivity 中获取，用户必须手动确认系统对话框。
 
+ContextBuilder 通过 `ScreenCaptureService.setContextBuilder(builder)` 静态方法注入，由 DouyinCommentService 在 `onCreate()` 中创建并注入。
+
 ### 显示 DPI
 
 VirtualDisplay 使用设备实际 DPI，确保截取的画面布局比例与真实屏幕一致。捕获分辨率固定 480p（宽度 480px，高度按屏幕比例计算）。
@@ -192,3 +232,43 @@ VirtualDisplay 使用设备实际 DPI，确保截取的画面布局比例与真�
 2. **`RESULT_OK` 的陷阱** — `Activity.RESULT_OK` 的值是 `-1`，通过 Intent 传递后 `intent.getIntExtra("resultCode", -1)` 的默认值 `-1` 和 `RESULT_OK` 无法区分，**只能通过检查 `data != null` 来判断授权成功**，不能用 `resultCode != -1`
 3. **`FOREGROUND_SERVICE_MEDIA_PROJECTION` 权限** — Android 14+ 专用前台服务类型，不声明则 `startForeground()` 会报错
 4. **START_STICKY 重启恢复** — 服务被系统杀死后以 START_STICKY 重启（intent=null），通过静态字段 `sSavedResultCode` / `sSavedData` 保存授权数据来自动恢复捕获
+
+## Phase 3: ContextBuilder (Context Fusion)
+
+### 架构
+
+ContextBuilder 通过监听者模式连接两个服务：
+
+- `DouyinCommentService.onCreate()` 创建 `ContextBuilder` 实例
+- 通过 `ScreenCaptureService.setContextBuilder()` 静态方法注入到截帧服务
+- 评论提取后的去重回调中调用 `contextBuilder.pushComments()`
+- 截图保存后调用 `contextBuilder.pushScreenshot()`
+- 内部维护 3 个线程安全的环形缓冲区：recentComments(max 20)、recentScreenshots(max 5)、timeline(max 30)
+- `buildContext()` 构建不可变的 `AppContext` 快照
+- `Listener.onContextUpdated()` 回调供 Phase 4 AI 管线接入
+
+### AppContext JSON 输出格式
+
+```json
+{
+  "app": "抖音",
+  "timestamp": "2026-06-16T23:52:37",
+  "comment_count": 5,
+  "recent_comments": [
+    { "user": "...", "text": "...", "likes": 731, "time": "9小时前", "location": "· 河北" }
+  ],
+  "latest_screenshot": "/data/data/.../cache/capture_...jpg",
+  "timeline": [
+    { "type": "comment", "time": "...", "detail": "..." },
+    { "type": "screenshot", "time": "...", "detail": "..." }
+  ]
+}
+```
+
+### Logcat 标签
+
+| Tag | 来源 | 用途 |
+|-----|------|------|
+| `DouyinComment` | CommentCollector | 评论提取 JSON 输出 |
+| `ScreenCapture` | ScreenCaptureService | 截帧状态日志 |
+| `ZuoYouContext` | ContextBuilder | 融合上下文 JSON 输出 |

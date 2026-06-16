@@ -60,7 +60,20 @@ public class ScreenCaptureService extends Service {
     // 捕获分辨率（DPI 使用系统实际值，保证布局比例正确）
     private static final int CAPTURE_WIDTH = 480;
 
-    public static boolean isRunning = false;
+    /** volatile 保证多线程可见性（主线程写 / HandlerThread 读） */
+    public static volatile boolean isRunning = false;
+
+    /**
+     * Phase 3 Context Builder 引用，由 DouyinCommentService 注入。
+     */
+    private static ContextBuilder sContextBuilder = null;
+
+    /**
+     * 设置 Context Builder 实例（在 DouyinCommentService.onCreate 中调用）。
+     */
+    public static void setContextBuilder(ContextBuilder builder) {
+        sContextBuilder = builder;
+    }
 
     /**
      * 保存 MediaProjection 授权数据，用于 START_STICKY 重启后自动恢复捕获。
@@ -202,6 +215,13 @@ public class ScreenCaptureService extends Service {
     private void captureFrame() {
         if (!isRunning || mImageReader == null) return;
 
+        // TODO: 检查前台应用是否为抖音，减少空耗
+        // 需 PACKAGE_USAGE_STATS 权限或 AccessibilityService 支持
+        // if (!isDouyinInForeground()) {
+        //     scheduleNextCapture();
+        //     return;
+        // }
+
         Image image = mImageReader.acquireLatestImage();
         if (image == null) {
             Log.w(TAG, "acquireLatestImage 返回 null（无新帧），跳过");
@@ -306,6 +326,11 @@ public class ScreenCaptureService extends Service {
         try (FileOutputStream fos = new FileOutputStream(file)) {
             bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos);
             Log.d(TAG, "保存帧：" + filename + " (" + file.length() / 1024 + "KB)");
+
+            // 通知 Context Builder（仅在抖音前台时推送有意义）
+            if (sContextBuilder != null) {
+                sContextBuilder.pushScreenshot(file.getAbsolutePath());
+            }
         } catch (Exception e) {
             Log.e(TAG, "保存帧失败", e);
         }
