@@ -101,9 +101,11 @@ public class ContextBuilder {
         List<Comment> commentsSnapshot;
         String latestScreenshot;
         List<TimelineEvent> timelineSnapshot;
+        int snapshotCount;
 
         synchronized (recentComments) {
             commentsSnapshot = List.copyOf(recentComments);
+            snapshotCount = totalCommentCount;
         }
         synchronized (recentScreenshots) {
             latestScreenshot = recentScreenshots.isEmpty() ? null : recentScreenshots.getLast();
@@ -115,7 +117,7 @@ public class ContextBuilder {
         return new AppContext(
                 "抖音",
                 timestampFormat.format(new Date()),
-                totalCommentCount,
+                snapshotCount,
                 commentsSnapshot,
                 latestScreenshot,
                 timelineSnapshot

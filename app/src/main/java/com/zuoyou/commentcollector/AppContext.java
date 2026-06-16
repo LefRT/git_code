@@ -62,6 +62,7 @@ public record AppContext(
 
             return json.toString(2);
         } catch (JSONException e) {
+            android.util.Log.e("ZuoYouContext", "AppContext JSON 序列化失败", e);
             return "{}";
         }
     }

@@ -98,7 +98,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 
 The timestamp regex in `CommentParser` is the critical anchor point. Its format includes Chinese-relative times (`昨天HH:mm`, `X分钟前`, `刚刚`) and absolute formats. The search is deliberately scoped to the latter 2/3 of the string to avoid matching digit sequences in usernames.
 
-**Node lifecycle is critical**: `collectRecursive` recycles its children in the `for` loop. `findLikeCount` is read-only and does NOT recycle. After `collectRecursive` returns, the root node is recycled by `onAccessibilityEvent`. Never use a node after its `recycle()` call, and never recycle a node twice.
+**Node lifecycle is critical**: `collectRecursive` recycles its children via `try-finally` in the `for` loop. `findLikeCount` also recycles all `getChild()`/`getParent()` wrappers in its own `try-finally` blocks (each `getChild()` returns a new independent Java wrapper that must be recycled separately). After `collectRecursive` returns, the root node is recycled by `onAccessibilityEvent`. Never use a node after its `recycle()` call, and never recycle a node twice.
 
 ## Architecture
 
@@ -177,6 +177,17 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 - **UI**: ConstraintLayout + MaterialButton + colors.xml
 - **API migration**: `requestPermissions()` → `ActivityResultLauncher`
 - **ProGuard**: Rules for JSON/Service/Callback classes
+
+### Bug fixes (2026-06-17) — code review round
+
+- **AccessibilityNodeInfo leak fix**: `findLikeCount` and `collectRecursive` now use `try-finally` to guarantee `recycle()` on all `getChild()`/`getParent()` wrappers. Every `getChild()` returns a new Java wrapper that must be independently recycled regardless of other references to the same native node.
+- **compress() return check**: `saveBitmapToCache()` now checks `bitmap.compress()` return value; failed JPEG compression no longer pushes an empty/corrupt file path to ContextBuilder.
+- **Data race fix**: `totalCommentCount` read in `buildContext()` is now inside `synchronized(recentComments)`, eliminating the JMM data race between the HandlerThread and main thread.
+- **Dedup key collision fix**: Changed from `user + "|" + text` string concatenation to `Objects.hash(user, text)` to avoid pipe-character delimiter conflicts.
+- **Debounce completeness**: `TYPE_WINDOW_STATE_CHANGED` is now also debounced (shared `lastProcessedTime` with CONTENT_CHANGED), preventing burst tree walks during video navigation.
+- **JSON exception logging**: `AppContext.toJson()` now logs the exception via `Log.e` instead of silently returning `"{}"`.
+- **I/O reduction**: `cleanupOldCaptures()` uses `mCaptureCount` counter to skip `listFiles()` for the first 50 frames and then only every 10th frame, reducing filesystem I/O.
+- **Dead allocation removed**: `CommentCollector.collect()` return type changed to `void` — callers use the `Listener` callback, so the unused return value was pure GC pressure.
 
 ## AndroidManifest & Permissions
 

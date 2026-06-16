@@ -39,11 +39,11 @@ public class CommentCollector {
 
     /**
      * 从根节点开始递归收集评论。
+     * 结果通过 {@link Listener} 回调传递，避免多余的返回值分配。
      *
      * @param rootNode 当前 Activity 的根 AccessibilityNodeInfo
-     * @return 本次提取到的评论列表（空列表表示没有找到）
      */
-    public List<Comment> collect(AccessibilityNodeInfo rootNode) {
+    public void collect(AccessibilityNodeInfo rootNode) {
         List<Comment> comments = new ArrayList<>();
         collectRecursive(rootNode, comments);
 
@@ -57,8 +57,6 @@ public class CommentCollector {
         } else {
             android.util.Log.d(TAG, "未提取到评论");
         }
-
-        return comments;
     }
 
     // ──────────────────────────────────────────────
@@ -84,14 +82,16 @@ public class CommentCollector {
 
         int childCount = safeGetChildCount(node);
         for (int i = 0; i < childCount; i++) {
+            AccessibilityNodeInfo child = null;
             try {
-                AccessibilityNodeInfo child = node.getChild(i);
+                child = node.getChild(i);
                 if (child != null) {
                     collectRecursive(child, comments);
-                    child.recycle();
                 }
             } catch (Exception e) {
                 android.util.Log.w(TAG, "遍历子节点 #" + i + " 时异常（已跳过）", e);
+            } finally {
+                if (child != null) child.recycle();
             }
         }
     }
@@ -102,7 +102,9 @@ public class CommentCollector {
 
     /**
      * 在评论节点内查找点赞数。
-     * 只读不回收——子节点的回收由上层统一处理。
+     *
+     * 注意：每次 getChild() / getParent() 都返回新的 Java 包装对象，
+     * 必须调用 recycle() 回收，否则泄漏原生资源会导致服务被系统杀死。
      */
     private int findLikeCount(AccessibilityNodeInfo node) {
         if (node == null) return 0;
@@ -112,9 +114,13 @@ public class CommentCollector {
             if (text.matches("\\d{1,6}")) {
                 AccessibilityNodeInfo parent = node.getParent();
                 if (parent != null) {
-                    CharSequence parentDesc = parent.getContentDescription();
-                    if (parentDesc != null && parentDesc.toString().contains("赞")) {
-                        return Integer.parseInt(text);
+                    try {
+                        CharSequence parentDesc = parent.getContentDescription();
+                        if (parentDesc != null && parentDesc.toString().contains("赞")) {
+                            return Integer.parseInt(text);
+                        }
+                    } finally {
+                        parent.recycle();
                     }
                 }
             }
@@ -127,8 +133,12 @@ public class CommentCollector {
             try {
                 AccessibilityNodeInfo child = node.getChild(i);
                 if (child != null) {
-                    int found = findLikeCount(child);
-                    if (found > 0) return found;
+                    try {
+                        int found = findLikeCount(child);
+                        if (found > 0) return found;
+                    } finally {
+                        child.recycle();
+                    }
                 }
             } catch (Exception e) {
                 android.util.Log.w(TAG, "findLikeCount 递归子节点 #" + i + " 异常（已跳过）", e);

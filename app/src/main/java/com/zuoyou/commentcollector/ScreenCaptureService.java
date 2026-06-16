@@ -324,12 +324,16 @@ public class ScreenCaptureService extends Service {
         File file = new File(cacheDir, filename);
 
         try (FileOutputStream fos = new FileOutputStream(file)) {
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos);
-            Log.d(TAG, "保存帧：" + filename + " (" + file.length() / 1024 + "KB)");
+            boolean success = bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos);
+            if (success) {
+                Log.d(TAG, "保存帧：" + filename + " (" + file.length() / 1024 + "KB)");
 
-            // 通知 Context Builder（仅在抖音前台时推送有意义）
-            if (sContextBuilder != null) {
-                sContextBuilder.pushScreenshot(file.getAbsolutePath());
+                // 通知 Context Builder（仅在抖音前台时推送有意义）
+                if (sContextBuilder != null) {
+                    sContextBuilder.pushScreenshot(file.getAbsolutePath());
+                }
+            } else {
+                Log.w(TAG, "JPEG 压缩失败：" + filename + "，跳过推送");
             }
         } catch (Exception e) {
             Log.e(TAG, "保存帧失败", e);
@@ -338,8 +342,12 @@ public class ScreenCaptureService extends Service {
 
     /**
      * 缓存目录最多保留 50 个最新捕获帧，超出的删除最旧的。
+     * 使用计数器避免每次捕获都做 listFiles() I/O。
      */
     private void cleanupOldCaptures(File cacheDir) {
+        // 前 50 帧和之后每 10 帧才扫描一次目录，减少磁盘 I/O
+        if (mCaptureCount < 50 || mCaptureCount % 10 != 0) return;
+
         File[] files = cacheDir.listFiles((dir, name) -> name.startsWith("capture_") && name.endsWith(".jpg"));
         if (files == null || files.length <= 50) return;
 

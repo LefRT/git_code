@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Phase 1 核心：抖音评论提取服务。
@@ -32,11 +33,11 @@ public class DouyinCommentService extends AccessibilityService {
 
     /**
      * 已提取评论的去重缓存（自动淘汰最旧条目）。
-     * key = "user|text"，超过 100 条自动移除最旧的。
+     * key = hash(user, text)，Integer 哈希键避免字符串拼接的分隔符冲突。
      */
-    private final LinkedHashMap<String, Boolean> recentComments = new LinkedHashMap<>() {
+    private final LinkedHashMap<Integer, Boolean> recentComments = new LinkedHashMap<>() {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<Integer, Boolean> eldest) {
             return size() > 100;
         }
     };
@@ -63,7 +64,8 @@ public class DouyinCommentService extends AccessibilityService {
             // 去重过滤：跳过已提取过的评论
             List<Comment> freshComments = new ArrayList<>();
             for (Comment c : comments) {
-                String key = c.user() + "|" + c.text();
+                // 使用复合哈希作为去重键，避免字符串拼接的分隔符冲突
+                Integer key = Objects.hash(c.user(), c.text());
                 if (!recentComments.containsKey(key)) {
                     recentComments.put(key, Boolean.TRUE);
                     freshComments.add(c);
@@ -83,8 +85,9 @@ public class DouyinCommentService extends AccessibilityService {
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
         if (!packageName.equals(DOUYIN_PACKAGE)) return;
 
-        // 事件防抖：TYPE_WINDOW_CONTENT_CHANGED 频率极高，500ms 内跳过
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+        // 事件防抖：500ms 内跳过重复处理，适用于 CONTENT_CHANGED 和 STATE_CHANGED
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                || event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             long now = System.currentTimeMillis();
             if (now - lastProcessedTime < MIN_EVENT_INTERVAL_MS) return;
             lastProcessedTime = now;
