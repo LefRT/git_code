@@ -11,4 +11,10 @@
 
     <!-- 功能色 -->
     <color name="success_green">#4CAF50</color>
+
+    <!-- Phase 4: 悬浮窗 -->
+    <color name="floating_bubble_bg">#CCFF6200</color>
+    <color name="floating_card_bg">#FFFFFF</color>
+    <color name="floating_card_text">#333333</color>
+    <color name="floating_border">#FF6200</color>
 </resources>

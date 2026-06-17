@@ -87,12 +87,55 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/accessibilityButton" />
 
+    <!-- 悬浮窗按钮 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/floatingWindowButton"
+        style="@style/Widget.MaterialComponents.Button"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:text="@string/floating_window_enable"
+        android:textSize="16sp"
+        android:textColor="@android:color/white"
+        app:backgroundTint="@color/success_green"
+        android:layout_marginTop="16dp"
+        app:cornerRadius="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/screenCaptureButton" />
+
+    <!-- 设置按钮 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/settingsButton"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:text="@string/settings_title"
+        android:textSize="14sp"
+        app:cornerRadius="8dp"
+        android:layout_marginTop="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/floatingWindowButton" />
+
+    <!-- AI 状态 -->
+    <TextView
+        android:id="@+id/aiStatusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/ai_status_idle"
+        android:textSize="14sp"
+        android:textColor="@color/text_hint"
+        android:layout_marginTop="16dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/settingsButton" />
+
     <!-- 使用说明 -->
     <TextView
         android:id="@+id/instructionText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出\n4. 「屏幕捕获」需授权才能捕获视频画面"
+        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出\n4. 「屏幕捕获」需授权才能捕获视频画面\n5. 在「API 设置」中配置 Key 后可开启 AI 陪看"
         android:textSize="14sp"
         android:textColor="@color/text_hint"
         android:lineSpacingMultiplier="1.6"
@@ -100,6 +143,6 @@
         android:gravity="start"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/screenCaptureButton" />
+        app:layout_constraintTop_toBottomOf="@id/aiStatusText" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

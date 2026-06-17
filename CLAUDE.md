@@ -62,6 +62,10 @@ app/src/main/java/com/zuoyou/commentcollector/
 ├── ContextBuilder.java          # Phase 3 — fused pipeline (comments + screenshots + timeline)
 ├── DouyinCommentService.java    # Phase 1 — AccessibilityService (now delegates to CommentCollector)
 ├── ScreenCaptureService.java    # Phase 2 — MediaProjection screen capture service
+├── AiPersonality.java           # Phase 4 — prompt engineering (3 personalities)
+├── AiService.java               # Phase 4 — DeepSeek API scheduler (debounce + cooldown + dedup)
+├── FloatingWindowService.java   # Phase 4 — system overlay floating bubble window
+├── SettingsActivity.java        # Phase 4 — API key & personality config UI
 └── MainActivity.java            # Launcher — service status & enable guide
 ```
 
@@ -162,7 +166,7 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 | 1 | AccessibilityService → comment extraction with likes | ✅ Done |
 | 2 | MediaProjection (screen capture) | ✅ Done |
 | 3 | Context Builder (fuse text + vision via ring buffers) | ✅ Done |
-| 4 | AI personality system + 悬浮窗 | ❌ Pending |
+| 4 | AI personality system + 悬浮窗 | ✅ Done |
 | 5 | Physical robot (ESP32-S3) | ❌ Pending |
 
 ### Optimization history (2026-06-16)
@@ -283,3 +287,94 @@ ContextBuilder 通过监听者模式连接两个服务：
 | `DouyinComment` | CommentCollector | 评论提取 JSON 输出 |
 | `ScreenCapture` | ScreenCaptureService | 截帧状态日志 |
 | `ZuoYouContext` | ContextBuilder | 融合上下文 JSON 输出 |
+| `ZuoYouAI` | AiService | AI 调用日志（配置加载、请求、响应） |
+| `ZuoYouFloat` | FloatingWindowService | 悬浮窗生命周期与交互日志 |
+
+## Phase 4: AI Personality System + Floating Window
+
+### 功能概述
+
+通过 DeepSeek API 将 AppContext 中的评论实时转化为 AI 吐槽，并通过系统悬浮窗展示。
+
+### 数据流
+
+```
+AppContext (评论 + 时间线)
+  → AiService.onContextUpdated()
+      → 内容哈希检测（相同评论跳过）
+      → 2s 防抖 + 8s 冷却
+  → AiService.callApi()
+      → 构建 system prompt（人格模板）
+      → 构建 user message（评论按热度排序 + 时间线 + 历史回复去重）
+      → OkHttp POST → DeepSeek API
+  → parseResponse() → {"text":"...","emotion":"..."}
+  → FloatingWindowService.showComment(text)
+      → 悬浮窗气泡 → 展开卡片显示吐槽（5s 自动收回）
+```
+
+### 关键类
+
+**`AiPersonality.java`** — Prompt 工程
+
+| 方法 | 作用 |
+|------|------|
+| `buildSystemPrompt()` | 返回三种人格的 system prompt：吐槽搭子（ROAST）/ 温柔陪伴（GENTLE）/ 搞笑段子手（FUNNY） |
+| `buildUserMessage(AppContext)` | 将评论按热度排序 + 时间线摘要格式化，附上已说过的话避免重复 |
+| `parseResponse(rawContent)` | 解析 LLM 返回的 `{"text":"...","emotion":"..."}` JSON |
+| `getTemperature()` | 各人格对应 temperature（0.85 / 0.70 / 0.95） |
+
+**`AiService.java`** — API 调度器
+
+| 功能 | 实现 |
+|------|------|
+| 防抖 | `onContextUpdated` 后等 2s 无新事件再触发 |
+| 冷却 | 两次 API 调用至少间隔 8s |
+| 内容去重 | `contentHash()` 计算最近 5 条评论的哈希，相同则跳过 |
+| 回复去重 | 维护最近 5 条回复列表，附在 user message 中让 AI 避免重复 |
+| 视频切换 | `resetVideoContext()` 重置哈希和冷却 |
+| 配置 | `loadConfig()` 每次调用前从 SharedPreferences 读取 |
+
+**`FloatingWindowService.java`** — 系统悬浮窗（前台 Service）
+
+| 状态 | 描述 |
+|------|------|
+| 气泡态 | 48dp 半透明橙色圆点，可拖拽到屏幕任意位置 |
+| 展开态 | 白色卡片（max 240dp 宽），显示 AI 吐槽文字，5s 后自动收回 |
+| 边缘吸附 | 拖拽结束后滑向最近的屏幕边缘 |
+| 触摸 | 展开态点击收回 + 气泡态点击展开最新吐槽 |
+
+### 配置
+
+通过 `SettingsActivity` 写入 `SharedPreferences`（文件：`zuoyou_prefs`）：
+
+| Key | 默认值 | 说明 |
+|-----|--------|------|
+| `api_key` | "" | DeepSeek API Key |
+| `api_base_url` | `https://api.deepseek.com/v1` | API 地址 |
+| `model_name` | `deepseek-chat` | 模型名 |
+| `personality` | `ROAST` | 人格（ROAST / GENTLE / FUNNY） |
+
+### 自适应采样（DouyinCommentService）
+
+当连续 3 次节点遍历都无新评论时，自动拉长事件间隔（1s → 2s → 4s → 最长 5s）。
+窗口切换（`TYPE_WINDOW_STATE_CHANGED`）时立即恢复 1s 并清空去重缓存。
+
+### 新文件清单
+
+- `AiPersonality.java` — Prompt 工程
+- `AiService.java` — DeepSeek API 调度器
+- `FloatingWindowService.java` — 系统悬浮窗
+- `SettingsActivity.java` — API 配置界面
+- `activity_settings.xml` — 设置页布局
+- `spinner_bg.xml` — 下拉框背景 shape
+
+### 新依赖
+
+- `com.squareup.okhttp3:okhttp:4.12.0` — HTTP 客户端
+
+### AndroidManifest 新增
+
+- `INTERNET` + `ACCESS_NETWORK_STATE` 权限
+- `FOREGROUND_SERVICE_SPECIAL_USE` 权限
+| `ZuoYouAI` | AiService | AI 调用日志（配置加载、请求、响应） |
+| `ZuoYouFloat` | FloatingWindowService | 悬浮窗生命周期与交互日志 |

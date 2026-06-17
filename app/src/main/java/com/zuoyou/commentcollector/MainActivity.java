@@ -3,6 +3,7 @@ package com.zuoyou.commentcollector;
 import android.Manifest;
 import android.content.Intent;
 import android.media.projection.MediaProjectionManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -17,9 +18,14 @@ import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "ZuoYouMain";
+
     private TextView statusText;
+    private TextView aiStatusText;
     private Button accessibilityButton;
     private Button screenCaptureButton;
+    private Button floatingWindowButton;
+    private Button settingsButton;
     private boolean isServiceRunning = false;
 
     /**
@@ -50,14 +56,31 @@ public class MainActivity extends AppCompatActivity {
                         }
                     });
 
+    /**
+     * 悬浮窗权限回调。
+     */
+    private final ActivityResultLauncher<Intent> overlayPermissionLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (Settings.canDrawOverlays(this)) {
+                            startFloatingWindowService();
+                        } else {
+                            Toast.makeText(this, R.string.overlay_permission_denied, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
         statusText = findViewById(R.id.statusText);
+        aiStatusText = findViewById(R.id.aiStatusText);
         accessibilityButton = findViewById(R.id.accessibilityButton);
         screenCaptureButton = findViewById(R.id.screenCaptureButton);
+        floatingWindowButton = findViewById(R.id.floatingWindowButton);
+        settingsButton = findViewById(R.id.settingsButton);
 
         // Android 13+ 需要 POST_NOTIFICATIONS 权限来显示前台通知
         requestNotificationPermission();
@@ -87,12 +110,56 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        // ── 悬浮窗按钮 ──
+        floatingWindowButton.setOnClickListener(v -> {
+            if (FloatingWindowService.isRunning()) {
+                // 停止悬浮窗
+                Intent intent = new Intent(this, FloatingWindowService.class);
+                intent.setAction("STOP");
+                startService(intent);
+                floatingWindowButton.setText(R.string.floating_window_enable);
+                aiStatusText.setText(R.string.ai_status_idle);
+            } else {
+                // Android 6+ 需要 SYSTEM_ALERT_WINDOW 权限
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        && !Settings.canDrawOverlays(this)) {
+                    Intent intent = new Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:" + getPackageName()));
+                    overlayPermissionLauncher.launch(intent);
+                } else {
+                    startFloatingWindowService();
+                }
+            }
+        });
+
+        // ── 设置按钮 ──
+        settingsButton.setOnClickListener(v -> {
+            Intent intent = new Intent(this, SettingsActivity.class);
+            startActivity(intent);
+        });
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         updateStatus();
+    }
+
+    /**
+     * 启动悬浮窗服务。
+     */
+    private void startFloatingWindowService() {
+        Intent intent = new Intent(this, FloatingWindowService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+        floatingWindowButton.setText(R.string.floating_window_disable);
+        aiStatusText.setText(R.string.ai_status_thinking);
+        Toast.makeText(this, "悬浮窗已开启", Toast.LENGTH_SHORT).show();
     }
 
     /**
@@ -108,9 +175,28 @@ public class MainActivity extends AppCompatActivity {
             isServiceRunning = false;
         }
 
-        // 屏幕捕获
-        if (ScreenCaptureService.isRunning) {
-            screenCaptureButton.setText("停止屏幕捕获");
+        // 屏幕捕获 + 悬浮窗
+        boolean screenOn = ScreenCaptureService.isRunning;
+        boolean floatOn = FloatingWindowService.isRunning();
+
+        if (floatOn) {
+            floatingWindowButton.setText(R.string.floating_window_disable);
+        } else {
+            floatingWindowButton.setText(R.string.floating_window_enable);
+        }
+
+        // AI 状态：独立判断，不依赖悬浮窗状态
+        boolean hasApiKey = !getSharedPreferences("zuoyou_prefs", MODE_PRIVATE)
+                .getString("api_key", "").isEmpty();
+        if (hasApiKey) {
+            aiStatusText.setText(R.string.ai_status_thinking);
+        } else {
+            aiStatusText.setText(R.string.ai_status_idle);
+        }
+
+        if (screenOn && floatOn) {
+            statusText.setText("状态：正在监听抖音 + 屏幕捕获 + AI 陪看");
+        } else if (screenOn) {
             statusText.setText("状态：正在监听抖音 + 屏幕捕获");
         } else if (isServiceRunning) {
             statusText.setText("状态：正在监听抖音");
