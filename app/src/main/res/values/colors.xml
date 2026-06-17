@@ -1,20 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主色取自 theme.xml colorPrimary -->
-    <color name="orange_primary">#FF6200</color>
-    <color name="orange_light">#FF8533</color>
-    <color name="blue_primary">#2196F3</color>
+    <!-- 主色 — 暖焰橙 -->
+    <color name="orange_primary">#FF6B35</color>
+    <color name="orange_light">#FF8A50</color>
+    <color name="orange_dark">#E55A2B</color>
+    <color name="orange_glow">#33FF6B35</color>
+
+    <!-- 辅助色 -->
+    <color name="blue_primary">#1E88E5</color>
+    <color name="blue_light">#42A5F5</color>
+    <color name="success_green">#4CAF50</color>
+    <color name="success_green_light">#66BB6A</color>
+
+    <!-- 背景色 -->
+    <color name="bg_cream">#FFF8F2</color>
+    <color name="bg_peach">#FFE8D6</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="bg_input">#F8F4F0</color>
 
     <!-- 文字色 -->
-    <color name="text_secondary">#666666</color>
-    <color name="text_hint">#999999</color>
+    <color name="text_primary">#2D2D2D</color>
+    <color name="text_secondary">#6B6B6B</color>
+    <color name="text_hint">#A0A0A0</color>
+    <color name="text_on_primary">#FFFFFF</color>
 
-    <!-- 功能色 -->
-    <color name="success_green">#4CAF50</color>
+    <!-- 分隔线 -->
+    <color name="divider">#1A000000</color>
+
+    <!-- 状态色 -->
+    <color name="status_active">#4CAF50</color>
+    <color name="status_inactive">#CCCCCC</color>
+    <color name="status_error">#FF5252</color>
 
     <!-- Phase 4: 悬浮窗 -->
-    <color name="floating_bubble_bg">#CCFF6200</color>
+    <color name="floating_bubble_bg">#CCFF6B35</color>
     <color name="floating_card_bg">#FFFFFF</color>
-    <color name="floating_card_text">#333333</color>
-    <color name="floating_border">#FF6200</color>
+    <color name="floating_card_text">#2D2D2D</color>
+    <color name="floating_border">#FF6B35</color>
 </resources>

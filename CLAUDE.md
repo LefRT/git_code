@@ -48,8 +48,8 @@ adb devices
 - **minSdk**: 21
 - **Java**: 17 (source & target compatibility)
 - **Namespace / applicationId**: `com.zuoyou.commentcollector`
-- **Test framework**: JUnit 4.13 (no tests written yet)
-- **Dependencies**: appcompat 1.6.1, Material 1.11.0, ConstraintLayout 2.1.4
+- **Test framework**: JUnit 4.13
+- **Dependencies**: appcompat 1.6.1, Material 1.11.0, ConstraintLayout 2.1.4, OkHttp 4.12.0, Security-Crypto 1.1.0-alpha06
 
 ## Project Files
 
@@ -59,14 +59,19 @@ app/src/main/java/com/zuoyou/commentcollector/
 ├── Comment.java                 # Phase 1 — data record (user, text, likeCount, time, location)
 ├── CommentCollector.java        # Phase 1 — tree traversal + parsing + JSON (extracted from service)
 ├── CommentParser.java           # Phase 1 — pure-Java contentDescription parser
+├── Constants.java               # Global constants (prefs keys, package names, defaults)
 ├── ContextBuilder.java          # Phase 3 — fused pipeline (comments + screenshots + timeline)
 ├── DouyinCommentService.java    # Phase 1 — AccessibilityService (now delegates to CommentCollector)
 ├── ScreenCaptureService.java    # Phase 2 — MediaProjection screen capture service
+├── SecurePrefs.java             # EncryptedSharedPreferences wrapper for API Key storage
 ├── AiPersonality.java           # Phase 4 — prompt engineering (3 personalities)
-├── AiService.java               # Phase 4 — DeepSeek API scheduler (debounce + cooldown + dedup)
+├── AiService.java               # Phase 4 — DeepSeek API scheduler (debounce + cooldown + dedup + retry)
 ├── FloatingWindowService.java   # Phase 4 — system overlay floating bubble window
 ├── SettingsActivity.java        # Phase 4 — API key & personality config UI
 └── MainActivity.java            # Launcher — service status & enable guide
+
+app/src/test/java/com/zuoyou/commentcollector/
+└── CommentParserTest.java       # Unit tests for CommentParser (25 test cases)
 ```
 
 ## How Comment Extraction Works (current implementation)
@@ -139,15 +144,56 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 └───────────────────────────────────────────────┘
 ```
 
-### Planned Architecture (from README)
+### Current Architecture (Phase 1-4)
+
+```
+┌────────────────────┐     ┌─────────────────────┐
+│  Douyin App UI     │     │     Phone Screen    │
+│  (Accessibility)   │     │  (MediaProjection)  │
+└────────┬───────────┘     └──────────┬──────────┘
+         │ AccessibilityEvent         │ 3s interval (Douyin foreground only)
+┌────────▼───────────────────────────▼──────────┐
+│           ContextBuilder (Phase 3)             │
+│  ┌────────────────┐  ┌──────────────────────┐ │
+│  │ CommentCollector│  │ ScreenCaptureService  │ │
+│  │ parse + dedup  │  │ imageToBitmap + save  │ │
+│  └───────┬────────┘  └──────────┬───────────┘ │
+│          │ pushComments()       │ pushScreenshot│
+│  ┌───────▼──────────────────────▼───────────┐ │
+│  │     Ring buffers (in-memory)             │ │
+│  │ ・recentComments (max 20)                │ │
+│  │ ・recentScreenshots (max 5)              │ │
+│  │ ・timeline (max 30 events)               │ │
+│  └───────┬──────────────────────────────────┘ │
+│          │ buildContext()                     │
+│          ▼                                    │
+│     AppContext → toJson() → Logcat            │
+└──────────────┬────────────────────────────────┘
+               │ onContextUpdated()
+┌──────────────▼────────────────────────────────┐
+│           AiService (Phase 4)                  │
+│  2s debounce + 8s cooldown + content hash     │
+│  + 3x exponential backoff retry               │
+│  → OkHttp POST → DeepSeek API                 │
+│  → parseResponse() → {"text","emotion"}       │
+└──────────────┬────────────────────────────────┘
+               │ onAiResponse()
+┌──────────────▼────────────────────────────────┐
+│      FloatingWindowService (Phase 4)           │
+│  气泡态 (48dp) ↔ 展开态 (card, 5s auto-hide)  │
+│  消息缓冲 (max 3) + 边缘吸附                  │
+└───────────────────────────────────────────────┘
+```
+
+### Planned: Phase 5 — Physical Robot
 
 ```
 ┌─────────────────────┐
 │     Android APP     │
 ├─────────────────────┤
-│ • 内容感知层        │  ← Phase 1-3: Accessibility + ScreenCapture + ContextBuilder
-│ • AI 接口层         │  ← Planned: LLM API calls
-│ • 悬浮窗交互        │  ← Planned: overlay UI for AI comments
+│ • 内容感知层        │  ← Phase 1-3
+│ • AI 接口层         │  ← Phase 4
+│ • 悬浮窗交互        │  ← Phase 4
 └──────────┬──────────┘
            │ WiFi
 ┌──────────▼──────────┐
@@ -193,13 +239,35 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 - **I/O reduction**: `cleanupOldCaptures()` uses `mCaptureCount` counter to skip `listFiles()` for the first 50 frames and then only every 10th frame, reducing filesystem I/O.
 - **Dead allocation removed**: `CommentCollector.collect()` return type changed to `void` — callers use the `Listener` callback, so the unused return value was pure GC pressure.
 
+### Improvements (2026-06-17) — Phase 4 hardening + test coverage
+
+**P0 — Critical fixes:**
+- **Unit tests**: Added `CommentParserTest.java` (25 test cases) covering normal formats, no-text/no-location, various timestamp patterns, edge cases, batch parsing, and username digit interference
+- **API retry**: `AiService.callApiWithRetry()` — exponential backoff (1s/2s/4s), up to 3 attempts. Retries on 429/500/502/503/504; other errors reported immediately
+- **Screen capture scoped to Douyin**: `ScreenCaptureService.setDouyinForeground(boolean)` static flag set by DouyinCommentService via accessibility events. `captureFrame()` skips capture when Douyin is not in foreground, saving battery and protecting privacy
+
+**P1 — Important fixes:**
+- **AI error feedback**: `DouyinCommentService.onError()` now shows a `Toast` on the main thread so users see API/network errors instead of silent failures
+- **Android 14+ property tag**: FloatingWindowService manifest declares `<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE">` — required by Android 14+ for `specialUse` foreground service type
+- **MediaProjection null handling**: `startCapture()` now calls `stopSelf()` when `getMediaProjection()` returns null, cleaning up the stale foreground service instead of leaving an empty shell
+- **Floating window message buffer**: `FloatingWindowService` buffers up to 3 AI replies when the service is not running; `flushPendingMessages()` replays them on startup
+- **Encrypted API Key storage**: `SecurePrefs.java` wraps `EncryptedSharedPreferences` (AES-256-GCM). API Key stored in `zuoyou_secure_prefs`, other config stays in `zuoyou_prefs`. Auto-migrates from plaintext on first use
+
+**P2 — Quality improvements:**
+- **Constants consolidation**: `Constants.java` centralizes `PREFS_NAME`, `DOUYIN_PACKAGE`, `KEY_*` constants, default values. Removed duplicate `DOUYIN_PACKAGE` from `CommentCollector`
+- **Bitmap reuse**: `ScreenCaptureService` pre-allocates `reusableBitmap` field; `imageToBitmap()` writes via `setPixels()` to avoid ~518KB allocation every 3 seconds
+- **Deprecated API migration**: `getDefaultDisplay().getMetrics()` replaced with `WindowManager.getCurrentWindowMetrics()` on API 30+ in both `ScreenCaptureService` and `FloatingWindowService`
+- **Accessibility service description**: Updated to detail data collection scope, compliant with Google Play policy
+
 ## AndroidManifest & Permissions
 
 - `SYSTEM_ALERT_WINDOW` — for future floating window overlay
 - `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PROJECTION` — ScreenCaptureService 前台服务必需
+- `FOREGROUND_SERVICE_SPECIAL_USE` — FloatingWindowService 前台服务类型（Android 14+）
 - `POST_NOTIFICATIONS` — Android 13+ 前台通知权限
 - `<queries>` targeting `com.ss.android.ugc.aweme` — Android 11+ package visibility
 - AccessibilityService bound with `BIND_ACCESSIBILITY_SERVICE`
+- FloatingWindowService 声明 `<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE">` — Android 14+ 强制要求
 
 ## Accessibility Config (`accessibility_service_config.xml`)
 
@@ -220,12 +288,13 @@ The timestamp regex in `CommentParser` is the critical anchor point. Its format 
 
 | 方法 | 作用 |
 |------|------|
-| `startCapture()` | 创建 MediaProjection → VirtualDisplay → ImageReader |
-| `captureFrame()` | 每 3 秒调用 `ImageReader.acquireLatestImage()` 获取最新帧 |
-| `imageToBitmap()` | 将 RGBA_8888 Image 转为 ARGB_8888 Bitmap（处理 R/B 通道重排 + row stride padding） |
+| `startCapture()` | 创建 MediaProjection → VirtualDisplay → ImageReader，预分配 Bitmap 缓冲区 |
+| `captureFrame()` | 每 3 秒调用 `ImageReader.acquireLatestImage()` 获取最新帧，仅在抖音前台时捕获 |
+| `imageToBitmap()` | 将 RGBA_8888 Image 转为 ARGB_8888 Bitmap（复用预分配缓冲区，处理 R/B 通道重排 + row stride padding） |
 | `saveBitmapToCache()` | JPEG 80% 质量写入 `getCacheDir()`，文件名 `capture_yyyyMMdd_HHmmss_SSS.jpg`，保存后通知 ContextBuilder |
-| `cleanupOldCaptures()` | 保留最新 50 帧，超出部分自动清理 |
-| `stopCapture()` | 释放 MediaProjection、VirtualDisplay、ImageReader、后台线程 |
+| `cleanupOldCaptures()` | 保留最新 50 帧，超出部分自动清理（每 10 帧检查一次） |
+| `stopCapture()` | 释放 MediaProjection、VirtualDisplay、ImageReader、后台线程、Bitmap 缓冲区 |
+| `setDouyinForeground()` | 静态方法，由 DouyinCommentService 设置抖音前台标志，控制是否捕获 |
 
 ### 跨 Service 通信
 
@@ -236,6 +305,8 @@ MainActivity 通过 Intent Action 控制 ScreenCaptureService：
 MediaProjection 权限通过 `ActivityResultLauncher<Intent>` 在 MainActivity 中获取，用户必须手动确认系统对话框。
 
 ContextBuilder 通过 `ScreenCaptureService.setContextBuilder(builder)` 静态方法注入，由 DouyinCommentService 在 `onCreate()` 中创建并注入。
+
+DouyinCommentService 通过 `ScreenCaptureService.setDouyinForeground(boolean)` 告知截帧服务抖音是否在前台。截帧服务仅在抖音前台时捕获屏幕，节省电量并避免截取敏感内容。
 
 ### 显示 DPI
 
@@ -303,13 +374,14 @@ AppContext (评论 + 时间线)
   → AiService.onContextUpdated()
       → 内容哈希检测（相同评论跳过）
       → 2s 防抖 + 8s 冷却
-  → AiService.callApi()
+  → AiService.callApiWithRetry()
       → 构建 system prompt（人格模板）
       → 构建 user message（评论按热度排序 + 时间线 + 历史回复去重）
-      → OkHttp POST → DeepSeek API
+      → OkHttp POST → DeepSeek API（最多 3 次指数退避重试）
   → parseResponse() → {"text":"...","emotion":"..."}
   → FloatingWindowService.showComment(text)
       → 悬浮窗气泡 → 展开卡片显示吐槽（5s 自动收回）
+      → 若服务未运行 → 消息缓冲（最多 3 条），启动后自动刷新
 ```
 
 ### 关键类
@@ -331,8 +403,9 @@ AppContext (评论 + 时间线)
 | 冷却 | 两次 API 调用至少间隔 8s |
 | 内容去重 | `contentHash()` 计算最近 5 条评论的哈希，相同则跳过 |
 | 回复去重 | 维护最近 5 条回复列表，附在 user message 中让 AI 避免重复 |
+| 重试 | `callApiWithRetry()` 最多 3 次指数退避（1s/2s/4s），429/500/502/503/504 自动重试 |
 | 视频切换 | `resetVideoContext()` 重置哈希和冷却 |
-| 配置 | `loadConfig()` 每次调用前从 SharedPreferences 读取 |
+| 配置 | `loadConfig()` 每次调用前读取；API Key 通过 `SecurePrefs` 加密存储 |
 
 **`FloatingWindowService.java`** — 系统悬浮窗（前台 Service）
 
@@ -342,17 +415,19 @@ AppContext (评论 + 时间线)
 | 展开态 | 白色卡片（max 240dp 宽），显示 AI 吐槽文字，5s 后自动收回 |
 | 边缘吸附 | 拖拽结束后滑向最近的屏幕边缘 |
 | 触摸 | 展开态点击收回 + 气泡态点击展开最新吐槽 |
+| 消息缓冲 | 服务未运行时暂存最多 3 条 AI 回复，启动后自动刷新 |
+| 屏幕参数 | API 30+ 使用 `WindowManager.getCurrentWindowMetrics()`，旧版本使用 `DisplayMetrics` |
 
 ### 配置
 
-通过 `SettingsActivity` 写入 `SharedPreferences`（文件：`zuoyou_prefs`）：
+通过 `SettingsActivity` 写入 `SharedPreferences`（文件：`zuoyou_prefs` + `zuoyou_secure_prefs`）：
 
-| Key | 默认值 | 说明 |
-|-----|--------|------|
-| `api_key` | "" | DeepSeek API Key |
-| `api_base_url` | `https://api.deepseek.com/v1` | API 地址 |
-| `model_name` | `deepseek-chat` | 模型名 |
-| `personality` | `ROAST` | 人格（ROAST / GENTLE / FUNNY） |
+| Key | 默认值 | 说明 | 存储位置 |
+|-----|--------|------|----------|
+| `api_key` | "" | DeepSeek API Key | `SecurePrefs`（AES-256 加密） |
+| `api_base_url` | `https://api.deepseek.com/v1` | API 地址 | 普通 SharedPreferences |
+| `model_name` | `deepseek-chat` | 模型名 | 普通 SharedPreferences |
+| `personality` | `ROAST` | 人格（ROAST / GENTLE / FUNNY） | 普通 SharedPreferences |
 
 ### 自适应采样（DouyinCommentService）
 
@@ -362,19 +437,24 @@ AppContext (评论 + 时间线)
 ### 新文件清单
 
 - `AiPersonality.java` — Prompt 工程
-- `AiService.java` — DeepSeek API 调度器
-- `FloatingWindowService.java` — 系统悬浮窗
+- `AiService.java` — DeepSeek API 调度器（含指数退避重试）
+- `FloatingWindowService.java` — 系统悬浮窗（含消息缓冲）
 - `SettingsActivity.java` — API 配置界面
+- `Constants.java` — 全局常量集中管理
+- `SecurePrefs.java` — API Key 加密存储（AES-256-GCM）
 - `activity_settings.xml` — 设置页布局
 - `spinner_bg.xml` — 下拉框背景 shape
+
+### 测试文件
+
+- `CommentParserTest.java` — CommentParser 单元测试（25 用例）
 
 ### 新依赖
 
 - `com.squareup.okhttp3:okhttp:4.12.0` — HTTP 客户端
+- `androidx.security:security-crypto:1.1.0-alpha06` — EncryptedSharedPreferences
 
 ### AndroidManifest 新增
 
 - `INTERNET` + `ACCESS_NETWORK_STATE` 权限
-- `FOREGROUND_SERVICE_SPECIAL_USE` 权限
-| `ZuoYouAI` | AiService | AI 调用日志（配置加载、请求、响应） |
-| `ZuoYouFloat` | FloatingWindowService | 悬浮窗生命周期与交互日志 |
+- `FOREGROUND_SERVICE_SPECIAL_USE` 权限 + `<property>` 标签（Android 14+）

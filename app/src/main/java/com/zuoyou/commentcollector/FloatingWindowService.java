@@ -51,8 +51,12 @@ public class FloatingWindowService extends Service {
     private static final int BUBBLE_ALPHA = 200; // 0-255
 
     /** 静态引用，用于外部线程安全调用。 */
-    private static FloatingWindowService sInstance = null;
+    private static volatile FloatingWindowService sInstance = null;
     private static final Handler sMainHandler = new Handler(Looper.getMainLooper());
+
+    /** 缓冲队列：悬浮窗未运行时暂存 AI 回复，启动后自动刷新 */
+    private static final java.util.LinkedList<String> sPendingMessages = new java.util.LinkedList<>();
+    private static final int MAX_PENDING = 3;
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams layoutParams;
@@ -82,7 +86,8 @@ public class FloatingWindowService extends Service {
 
     /**
      * 从任意线程安全地推送 AI 吐槽到悬浮窗。
-     * 如果服务未运行，调用无效果。
+     * 如果服务未运行，消息会被缓冲（最多 {@link #MAX_PENDING} 条），
+     * 服务启动后自动刷新显示。
      */
     public static void showComment(String text) {
         if (text == null || text.isEmpty()) return;
@@ -90,7 +95,14 @@ public class FloatingWindowService extends Service {
             if (sInstance != null) {
                 sInstance.showCommentInternal(text);
             } else {
-                Log.w(TAG, "悬浮窗服务未运行，丢弃消息: " + text);
+                // 缓冲消息，等服务启动后刷新
+                synchronized (sPendingMessages) {
+                    sPendingMessages.addLast(text);
+                    if (sPendingMessages.size() > MAX_PENDING) {
+                        sPendingMessages.removeFirst();
+                    }
+                }
+                Log.d(TAG, "悬浮窗未运行，消息已缓冲: " + text);
             }
         });
     }
@@ -116,6 +128,9 @@ public class FloatingWindowService extends Service {
 
         initOverlay();
         updateNotification("AI 陪看已开启");
+
+        // 刷新缓冲的消息
+        flushPendingMessages();
     }
 
     @Override
@@ -150,9 +165,18 @@ public class FloatingWindowService extends Service {
     // ───── 悬浮窗构建 ─────
 
     private void initOverlay() {
-        DisplayMetrics metrics = new DisplayMetrics();
-        windowManager.getDefaultDisplay().getMetrics(metrics);
-        screenWidth = metrics.widthPixels;
+        int screenHeightPx;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.WindowMetrics wmMetrics = windowManager.getCurrentWindowMetrics();
+            android.graphics.Rect bounds = wmMetrics.getBounds();
+            screenWidth = bounds.width();
+            screenHeightPx = bounds.height();
+        } else {
+            DisplayMetrics metrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(metrics);
+            screenWidth = metrics.widthPixels;
+            screenHeightPx = metrics.heightPixels;
+        }
 
         int bubbleSizePx = dpToPx(BUBBLE_SIZE_DP);
 
@@ -207,7 +231,7 @@ public class FloatingWindowService extends Service {
         // 初始位置：屏幕底部居中
         int statusBarHeight = getStatusBarHeight();
         int bottomMargin = dpToPx(80);
-        layoutParams.y = metrics.heightPixels - bottomMargin - bubbleSizePx - statusBarHeight;
+        layoutParams.y = screenHeightPx - bottomMargin - bubbleSizePx - statusBarHeight;
         layoutParams.x = (screenWidth - bubbleSizePx) / 2;
 
         windowManager.addView(rootView, layoutParams);
@@ -239,6 +263,24 @@ public class FloatingWindowService extends Service {
         card.addView(commentText);
 
         return card;
+    }
+
+    // ───── 缓冲消息刷新 ─────
+
+    /**
+     * 服务启动后，将缓冲的消息逐条显示。
+     */
+    private void flushPendingMessages() {
+        java.util.List<String> pending;
+        synchronized (sPendingMessages) {
+            if (sPendingMessages.isEmpty()) return;
+            pending = new java.util.ArrayList<>(sPendingMessages);
+            sPendingMessages.clear();
+        }
+        for (String msg : pending) {
+            showCommentInternal(msg);
+        }
+        Log.d(TAG, "已刷新 " + pending.size() + " 条缓冲消息");
     }
 
     // ───── 显示逻辑 ─────
@@ -368,24 +410,34 @@ public class FloatingWindowService extends Service {
      */
     private void snapToEdge() {
         int bubbleSizePx = dpToPx(BUBBLE_SIZE_DP);
-        DisplayMetrics metrics = new DisplayMetrics();
-        windowManager.getDefaultDisplay().getMetrics(metrics);
+        int widthPx, heightPx;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.WindowMetrics wmMetrics = windowManager.getCurrentWindowMetrics();
+            android.graphics.Rect bounds = wmMetrics.getBounds();
+            widthPx = bounds.width();
+            heightPx = bounds.height();
+        } else {
+            DisplayMetrics metrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(metrics);
+            widthPx = metrics.widthPixels;
+            heightPx = metrics.heightPixels;
+        }
 
         int halfBubble = bubbleSizePx / 2;
         int centerX = layoutParams.x + halfBubble;
         int leftDist = centerX;
-        int rightDist = metrics.widthPixels - centerX;
+        int rightDist = widthPx - centerX;
 
         if (leftDist < rightDist) {
             layoutParams.x = dpToPx(EDGE_MARGIN_DP);
         } else {
-            layoutParams.x = metrics.widthPixels - bubbleSizePx - dpToPx(EDGE_MARGIN_DP);
+            layoutParams.x = widthPx - bubbleSizePx - dpToPx(EDGE_MARGIN_DP);
         }
 
         // 确保不超出顶部/底部边界
         int statusBarH = getStatusBarHeight();
         layoutParams.y = Math.max(statusBarH,
-                Math.min(layoutParams.y, metrics.heightPixels - bubbleSizePx - dpToPx(16)));
+                Math.min(layoutParams.y, heightPx - bubbleSizePx - dpToPx(16)));
 
         try {
             windowManager.updateViewLayout(rootView, layoutParams);

@@ -24,7 +24,7 @@
     </queries>
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.ZuoYou">
@@ -62,7 +62,12 @@
         <service
             android:name=".FloatingWindowService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <!-- Android 14+ 要求声明 <property> 描述特殊前台服务用途 -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="AI overlay floating window for displaying real-time commentary on Douyin content" />
+        </service>
 
         <!-- API 设置界面 -->
         <activity

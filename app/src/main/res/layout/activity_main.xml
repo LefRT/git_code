@@ -1,148 +1,244 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="32dp">
+    android:orientation="vertical"
+    android:background="@drawable/bg_main_gradient">
 
-    <!-- Logo / 标题 -->
-    <TextView
-        android:id="@+id/titleText"
-        android:layout_width="wrap_content"
+    <!-- ═══ 头部区域 — 橙色渐变 ═══ -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textSize="48sp"
-        android:textStyle="bold"
-        android:textColor="@color/orange_primary"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        android:layout_marginTop="48dp" />
+        android:orientation="vertical"
+        android:background="@drawable/bg_header"
+        android:paddingTop="48dp"
+        android:paddingBottom="32dp"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:gravity="center_horizontal">
 
-    <TextView
-        android:id="@+id/subtitleText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="AI 陪看助手"
-        android:textSize="18sp"
-        android:textColor="@color/text_secondary"
-        android:layout_marginTop="8dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/titleText" />
+        <!-- App 名称 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textSize="42sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_on_primary"
+            android:letterSpacing="0.15" />
 
-    <!-- 分隔线 -->
-    <View
-        android:id="@+id/divider"
-        android:layout_width="0dp"
-        android:layout_height="1dp"
-        android:background="?android:attr/listDivider"
-        android:layout_marginTop="40dp"
-        android:layout_marginBottom="32dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/subtitleText" />
+        <!-- 副标题 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AI 陪看助手"
+            android:textSize="15sp"
+            android:textColor="#B3FFFFFF"
+            android:layout_marginTop="4dp"
+            android:letterSpacing="0.08" />
 
-    <!-- 状态显示 -->
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="状态：未开启服务"
-        android:textSize="16sp"
-        android:textColor="?android:attr/textColorSecondary"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/divider" />
+    </LinearLayout>
 
-    <!-- 无障碍服务按钮 -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/accessibilityButton"
-        style="@style/Widget.MaterialComponents.Button"
-        android:layout_width="0dp"
-        android:layout_height="56dp"
-        android:text="开启无障碍服务"
-        android:textSize="16sp"
-        android:textColor="@android:color/white"
-        app:backgroundTint="@color/orange_primary"
-        android:layout_marginTop="24dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusText" />
+    <!-- ═══ 内容区域（可滚动） ═══ -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp">
 
-    <!-- 屏幕捕获按钮 -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/screenCaptureButton"
-        style="@style/Widget.MaterialComponents.Button"
-        android:layout_width="0dp"
-        android:layout_height="56dp"
-        android:text="开启屏幕捕获"
-        android:textSize="16sp"
-        android:textColor="@android:color/white"
-        app:backgroundTint="@color/blue_primary"
-        android:layout_marginTop="16dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/accessibilityButton" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
-    <!-- 悬浮窗按钮 -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/floatingWindowButton"
-        style="@style/Widget.MaterialComponents.Button"
-        android:layout_width="0dp"
-        android:layout_height="56dp"
-        android:text="@string/floating_window_enable"
-        android:textSize="16sp"
-        android:textColor="@android:color/white"
-        app:backgroundTint="@color/success_green"
-        android:layout_marginTop="16dp"
-        app:cornerRadius="12dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/screenCaptureButton" />
+            <!-- ═══ 状态卡片 ═══ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="20dp"
+                android:elevation="2dp">
 
-    <!-- 设置按钮 -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/settingsButton"
-        style="@style/Widget.MaterialComponents.Button.TextButton"
-        android:layout_width="0dp"
-        android:layout_height="40dp"
-        android:text="@string/settings_title"
-        android:textSize="14sp"
-        app:cornerRadius="8dp"
-        android:layout_marginTop="8dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/floatingWindowButton" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="运行状态"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_hint"
+                    android:letterSpacing="0.05"
+                    android:textAllCaps="true" />
 
-    <!-- AI 状态 -->
-    <TextView
-        android:id="@+id/aiStatusText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/ai_status_idle"
-        android:textSize="14sp"
-        android:textColor="@color/text_hint"
-        android:layout_marginTop="16dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/settingsButton" />
+                <!-- 状态行：圆点 + 文字 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="12dp">
 
-    <!-- 使用说明 -->
-    <TextView
-        android:id="@+id/instructionText"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="使用说明：\n1. 点击上方按钮开启无障碍服务\n2. 在系统设置中找到「左右」并开启\n3. 打开抖音，查看 Logcat 输出\n4. 「屏幕捕获」需授权才能捕获视频画面\n5. 在「API 设置」中配置 Key 后可开启 AI 陪看"
-        android:textSize="14sp"
-        android:textColor="@color/text_hint"
-        android:lineSpacingMultiplier="1.6"
-        android:layout_marginTop="48dp"
-        android:gravity="start"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/aiStatusText" />
+                    <View
+                        android:id="@+id/statusDot"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/bg_status_inactive" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+                    <TextView
+                        android:id="@+id/statusText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="未开启服务"
+                        android:textSize="16sp"
+                        android:textColor="@color/text_primary"
+                        android:textStyle="bold"
+                        android:layout_marginStart="10dp" />
+                </LinearLayout>
+
+                <!-- AI 状态行 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="8dp">
+
+                    <View
+                        android:id="@+id/aiDot"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/bg_status_inactive" />
+
+                    <TextView
+                        android:id="@+id/aiStatusText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/ai_status_idle"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginStart="10dp" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- ═══ 控制按钮卡片 ═══ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="20dp"
+                android:layout_marginTop="14dp"
+                android:elevation="2dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="服务控制"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_hint"
+                    android:letterSpacing="0.05"
+                    android:textAllCaps="true"
+                    android:layout_marginBottom="14dp" />
+
+                <!-- 无障碍服务按钮 -->
+                <TextView
+                    android:id="@+id/accessibilityButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:background="@drawable/ripple_button_orange"
+                    android:text="开启无障碍服务"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <!-- 屏幕捕获按钮 -->
+                <TextView
+                    android:id="@+id/screenCaptureButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:background="@drawable/ripple_button_blue"
+                    android:text="开启屏幕捕获"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginTop="10dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <!-- 悬浮窗按钮 -->
+                <TextView
+                    android:id="@+id/floatingWindowButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:background="@drawable/ripple_button_green"
+                    android:text="@string/floating_window_enable"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginTop="10dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <!-- 设置按钮（低调 outline 风格） -->
+                <TextView
+                    android:id="@+id/settingsButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:background="@drawable/bg_button_outline"
+                    android:text="⚙  API 设置"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_secondary"
+                    android:gravity="center"
+                    android:layout_marginTop="10dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+            </LinearLayout>
+
+            <!-- ═══ 使用说明卡片 ═══ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="20dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="8dp"
+                android:elevation="2dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="快速上手"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_hint"
+                    android:letterSpacing="0.05"
+                    android:textAllCaps="true"
+                    android:layout_marginBottom="12dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="① 点击「开启无障碍服务」→ 系统设置中找到「左右」并开启\n② 返回 App，点击「开启屏幕捕获」并授权\n③ 打开抖音，AI 将自动分析评论并展示吐槽\n④ 点击「开启悬浮窗」在抖音上方查看 AI 回复"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:lineSpacingMultiplier="1.7" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

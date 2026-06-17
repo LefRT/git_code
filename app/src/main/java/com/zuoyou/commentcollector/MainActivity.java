@@ -8,7 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.widget.Button;
+import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -22,10 +22,12 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView statusText;
     private TextView aiStatusText;
-    private Button accessibilityButton;
-    private Button screenCaptureButton;
-    private Button floatingWindowButton;
-    private Button settingsButton;
+    private View statusDot;
+    private View aiDot;
+    private TextView accessibilityButton;
+    private TextView screenCaptureButton;
+    private TextView floatingWindowButton;
+    private TextView settingsButton;
     private boolean isServiceRunning = false;
 
     /**
@@ -77,6 +79,8 @@ public class MainActivity extends AppCompatActivity {
 
         statusText = findViewById(R.id.statusText);
         aiStatusText = findViewById(R.id.aiStatusText);
+        statusDot = findViewById(R.id.statusDot);
+        aiDot = findViewById(R.id.aiDot);
         accessibilityButton = findViewById(R.id.accessibilityButton);
         screenCaptureButton = findViewById(R.id.screenCaptureButton);
         floatingWindowButton = findViewById(R.id.floatingWindowButton);
@@ -168,7 +172,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateStatus() {
         // 无障碍服务
         if (isAccessibilityServiceEnabled()) {
-            accessibilityButton.setText("服务已开启");
+            accessibilityButton.setText("✓ 无障碍服务已开启");
             isServiceRunning = true;
         } else {
             accessibilityButton.setText("开启无障碍服务");
@@ -185,23 +189,29 @@ public class MainActivity extends AppCompatActivity {
             floatingWindowButton.setText(R.string.floating_window_enable);
         }
 
-        // AI 状态：独立判断，不依赖悬浮窗状态
-        boolean hasApiKey = !getSharedPreferences("zuoyou_prefs", MODE_PRIVATE)
-                .getString("api_key", "").isEmpty();
+        // AI 状态
+        boolean hasApiKey = !new SecurePrefs(this).getApiKey().isEmpty();
         if (hasApiKey) {
             aiStatusText.setText(R.string.ai_status_thinking);
+            aiDot.setBackgroundResource(R.drawable.bg_status_active);
         } else {
             aiStatusText.setText(R.string.ai_status_idle);
+            aiDot.setBackgroundResource(R.drawable.bg_status_inactive);
         }
 
+        // 状态文字 + 指示灯
         if (screenOn && floatOn) {
-            statusText.setText("状态：正在监听抖音 + 屏幕捕获 + AI 陪看");
+            statusText.setText("监听中 · 屏幕捕获 · AI 陪看");
+            statusDot.setBackgroundResource(R.drawable.bg_status_active);
         } else if (screenOn) {
-            statusText.setText("状态：正在监听抖音 + 屏幕捕获");
+            statusText.setText("监听中 · 屏幕捕获");
+            statusDot.setBackgroundResource(R.drawable.bg_status_active);
         } else if (isServiceRunning) {
-            statusText.setText("状态：正在监听抖音");
+            statusText.setText("监听中");
+            statusDot.setBackgroundResource(R.drawable.bg_status_active);
         } else {
-            statusText.setText("状态：未开启服务");
+            statusText.setText("未开启服务");
+            statusDot.setBackgroundResource(R.drawable.bg_status_inactive);
             screenCaptureButton.setText("开启屏幕捕获");
         }
     }

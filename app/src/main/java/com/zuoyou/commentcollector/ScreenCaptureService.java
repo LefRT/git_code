@@ -16,401 +16,153 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.view.Display;
-
-import androidx.core.app.NotificationCompat;
+import android.view.WindowManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.nio.ByteBuffer;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.Locale;
 
 /**
- * Phase 2: 屏幕捕获服务。
+ * Phase 2: 屏幕捕获服务 — 通过 MediaProjection 定时截取屏幕帧。
  *
- * 通过 MediaProjection API 定时截取屏幕帧，保存为 JPEG 到缓存目录。
- * 捕获分辨率固定为 480p（宽 480，高根据屏幕比例计算），平衡清晰度与性能。
+ * <p>功能：
+ * <ul>
+ *   <li>每 3 秒截取一帧屏幕画面（480p 宽度，高度按比例）</li>
+ *   <li>保存为 JPEG 到应用缓存目录</li>
+ *   <li>通知 {@link ContextBuilder} 推送截图</li>
+ *   <li>自动清理超过 50 帧的旧截图</li>
+ *   <li>仅在抖音前台时捕获（通过 {@link #setDouyinForeground(boolean)} 控制）</li>
+ * </ul>
  *
- * ## START_STICKY 重启保护
- *
- * Android 在服务被异常杀死后会以 START_STICKY 重启（intent = null）。
- * 为了在重启后能自动恢复捕获，授权数据（resultCode + data）保存在
- * 静态字段中，重启时自动读取并重新调用 startCapture()。
- *
- * TODO:
- *   - 检查前台应用是否为抖音（需 PACKAGE_USAGE_STATS 或系统 API 支持）
- *   - 接入 Phase 3 Context Builder，直接将帧传递给 AI 处理管线
- *   - 动态分辨率适应（当前为固定 480p）
- *   - 清理旧帧缓存，防止磁盘增长
+ * <p>跨 Service 通信：
+ * <ul>
+ *   <li>通过 Intent Action 控制：START_CAPTURE / STOP_CAPTURE</li>
+ *   <li>通过 {@link #setContextBuilder(ContextBuilder)} 注入 Phase 3 管道</li>
+ *   <li>通过 {@link #setDouyinForeground(boolean)} 接收前台状态</li>
+ * </ul>
  */
 public class ScreenCaptureService extends Service {
 
     private static final String TAG = "ScreenCapture";
-    private static final int NOTIFICATION_ID = 1001;
-    private static final String CHANNEL_ID = "screen_capture";
+    private static final String CHANNEL_ID = "screen_capture_channel";
+    private static final int NOTIFICATION_ID = 2;
+
+    /** 截帧间隔（毫秒） */
     private static final long CAPTURE_INTERVAL_MS = 3000;
 
-    // 捕获分辨率（DPI 使用系统实际值，保证布局比例正确）
-    private static final int CAPTURE_WIDTH = 480;
+    /** JPEG 压缩质量 (0-100) */
+    private static final int JPEG_QUALITY = 80;
 
-    /** volatile 保证多线程可见性（主线程写 / HandlerThread 读） */
+    /** 保留最新截图数量，超出部分自动清理 */
+    private static final int MAX_CAPTURES = 50;
+
+    /** 每隔多少帧执行一次清理检查 */
+    private static final int CLEANUP_EVERY_N_FRAMES = 10;
+
+    // ── 静态字段：跨组件共享 ──
+
+    /** 服务是否正在运行（volatile 保证跨线程可见性） */
     public static volatile boolean isRunning = false;
 
-    /**
-     * Phase 3 Context Builder 引用，由 DouyinCommentService 注入。
-     */
-    private static ContextBuilder sContextBuilder = null;
+    /** 用于 MediaProjection 重启恢复的授权数据 */
+    private static int sSavedResultCode = 0;
+    private static Intent sSavedData = null;
 
-    /**
-     * 设置 Context Builder 实例（在 DouyinCommentService.onCreate 中调用）。
-     */
+    /** Phase 3 上下文构建器（由 DouyinCommentService 注入） */
+    private static volatile ContextBuilder sContextBuilder = null;
+
+    /** 抖音是否在前台（由 DouyinCommentService 通过无障碍事件设置） */
+    private static volatile boolean sDouyinForeground = false;
+
+    // ── 实例字段 ──
+
+    private MediaProjection mediaProjection;
+    private VirtualDisplay virtualDisplay;
+    private ImageReader imageReader;
+    private Handler backgroundHandler;
+    private android.os.HandlerThread backgroundThread;
+
+    private int screenWidth;
+    private int screenHeight;
+    private int captureWidth;
+    private int captureHeight;
+    private int screenDpi;
+
+    private long mCaptureCount = 0;
+    private final SimpleDateFormat fileNameFormat =
+            new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.CHINA);
+
+    /** 预分配的 Bitmap 缓冲区（避免每帧分配 ~518KB） */
+    private Bitmap reusableBitmap;
+
+    // ── 静态方法 ──
+
     public static void setContextBuilder(ContextBuilder builder) {
         sContextBuilder = builder;
     }
 
     /**
-     * 保存 MediaProjection 授权数据，用于 START_STICKY 重启后自动恢复捕获。
+     * 设置抖音是否在前台。由 {@link DouyinCommentService} 在无障碍事件中调用。
+     * 当抖音不在前台时，截帧暂停以节省电量和保护隐私。
      */
-    private static int sSavedResultCode = -1;
-    private static Intent sSavedData = null;
+    public static void setDouyinForeground(boolean foreground) {
+        sDouyinForeground = foreground;
+    }
 
-    private MediaProjectionManager mProjectionManager;
-    private MediaProjection mMediaProjection;
-    private VirtualDisplay mVirtualDisplay;
-    private ImageReader mImageReader;
+    /**
+     * 保存 MediaProjection 授权数据，用于 START_STICKY 重启恢复。
+     */
+    public static void saveProjectionData(int resultCode, Intent data) {
+        sSavedResultCode = resultCode;
+        sSavedData = data;
+    }
 
-    private HandlerThread mCaptureThread;
-    private Handler mCaptureHandler;
-    private int mCaptureCount = 0;
-    private int mCaptureHeight; // 根据屏幕比例计算
+    // ── 生命周期 ──
 
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "=== ScreenCaptureService 创建 ===");
-        mProjectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-        createNotificationChannel();
+        startForegroundNotification();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(TAG, "onStartCommand: intent=" + intent
-                + ", flags=" + flags + ", startId=" + startId);
-
-        // 每次启动都必须调用 startForeground，否则 Android 会抛异常
-        startForeground(NOTIFICATION_ID, buildNotification("正在初始化…"));
-
-        if (intent != null && intent.getAction() != null) {
-            switch (intent.getAction()) {
-                case "START_CAPTURE": {
-                    int resultCode = intent.getIntExtra("resultCode", -1);
-                    Intent data = intent.getParcelableExtra("data");
-                    // 注意：RESULT_OK == -1（Activity 常量），所以不能判断 resultCode != -1
-                    if (data != null) {
-                        // 保存授权数据，用于 START_STICKY 重启恢复
-                        sSavedResultCode = resultCode;
-                        sSavedData = data;
-                        Log.d(TAG, "startCapture(" + resultCode + ", data) 被调用");
-                        startCapture(resultCode, data);
-                    } else {
-                        Log.e(TAG, "START_CAPTURE 缺少必要的授权数据 (resultCode=" + resultCode + ")");
-                    }
-                    break;
-                }
-                case "STOP_CAPTURE":
-                    stopCapture();
-                    break;
-            }
-        } else if (sSavedData != null && !isRunning) {
-            // START_STICKY 重启：intent 为 null，但从静态字段恢复捕获
-            Log.i(TAG, "START_STICKY 重启，从静态字段恢复捕获");
-            startCapture(sSavedResultCode, sSavedData);
-        }
-
-        return START_STICKY;
-    }
-
-    /**
-     * 创建 MediaProjection + VirtualDisplay + ImageReader，启动定时捕获。
-     */
-    private void startCapture(int resultCode, Intent data) {
-        Log.d(TAG, "startCapture() 被调用, resultCode=" + resultCode);
-
-        // 如果已经在捕获，先停止
-        if (mMediaProjection != null) {
-            mMediaProjection.stop();
-            mMediaProjection = null;
-        }
-
-        mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data);
-        if (mMediaProjection == null) {
-            Log.e(TAG, "getMediaProjection 返回 null，无法启动捕获");
-            return;
-        }
-
-        // Android 14+ 要求：在 createVirtualDisplay 之前必须先注册 callback
-        mMediaProjection.registerCallback(new MediaProjection.Callback() {
-            @Override
-            public void onStop() {
-                Log.d(TAG, "MediaProjection 被系统停止");
-                stopCapture();
-            }
-        }, null);
-
-        // 根据屏幕比例计算捕获高度
-        DisplayManager dm = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
-        Display display = dm.getDisplay(Display.DEFAULT_DISPLAY);
-        DisplayMetrics metrics = new DisplayMetrics();
-        display.getRealMetrics(metrics);
-        int realWidth = metrics.widthPixels;
-        int realHeight = metrics.heightPixels;
-        mCaptureHeight = (int) ((float) CAPTURE_WIDTH / realWidth * realHeight);
-
-        // ImageReader：队列深度 2，用 acquireLatestImage 跳过堆积的旧帧
-        mImageReader = ImageReader.newInstance(
-                CAPTURE_WIDTH, mCaptureHeight,
-                PixelFormat.RGBA_8888, 2);
-
-        // VirtualDisplay：镜像主屏内容
-        mVirtualDisplay = mMediaProjection.createVirtualDisplay(
-                "ZuoYouScreenCapture",
-                CAPTURE_WIDTH, mCaptureHeight,
-                metrics.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                mImageReader.getSurface(),
-                null, null);
-
-        // 专用后台线程
-        mCaptureThread = new HandlerThread("ScreenCaptureThread");
-        mCaptureThread.start();
-        mCaptureHandler = new Handler(mCaptureThread.getLooper());
-
-        isRunning = true;
-        mCaptureCount = 0;
-
-        // 更新通知
-        updateNotification("正在捕获屏幕…");
-        scheduleNextCapture();
-
-        Log.d(TAG, "捕获已启动：" + CAPTURE_WIDTH + "x" + mCaptureHeight
-                + "，来源屏幕：" + realWidth + "x" + realHeight);
-    }
-
-    private void scheduleNextCapture() {
-        if (mCaptureHandler != null && mCaptureHandler.getLooper().getThread().isAlive()) {
-            mCaptureHandler.postDelayed(this::captureFrame, CAPTURE_INTERVAL_MS);
-        }
-    }
-
-    /**
-     * 核心捕获方法：获取最新帧 → 转为 Bitmap → 保存为 JPEG。
-     */
-    private void captureFrame() {
-        if (!isRunning || mImageReader == null) return;
-
-        // TODO: 检查前台应用是否为抖音，减少空耗
-        // 需 PACKAGE_USAGE_STATS 权限或 AccessibilityService 支持
-        // if (!isDouyinInForeground()) {
-        //     scheduleNextCapture();
-        //     return;
-        // }
-
-        Image image = mImageReader.acquireLatestImage();
-        if (image == null) {
-            Log.w(TAG, "acquireLatestImage 返回 null（无新帧），跳过");
-            scheduleNextCapture();
-            return;
-        }
-
-        Bitmap bitmap = imageToBitmap(image);
-        image.close();
-
-        if (bitmap == null) {
-            Log.w(TAG, "imageToBitmap 返回 null，跳过");
-            scheduleNextCapture();
-            return;
-        }
-
-        mCaptureCount++;
-        saveBitmapToCache(bitmap);
-        bitmap.recycle();
-
-        Log.d(TAG, "已捕获帧 #" + mCaptureCount + " (" + CAPTURE_WIDTH + "x" + mCaptureHeight + ")");
-
-        scheduleNextCapture();
-    }
-
-    /**
-     * 将 Image（RGBA_8888）转换为 ARGB_8888 Bitmap。
-     *
-     * 注意处理了：
-     * - ImageReader 的 rowStride 可能 > width * pixelStride（行尾填充）
-     * - RGBA → ARGB 的通道重排（R/B swap）
-     */
-    private Bitmap imageToBitmap(Image image) {
-        Image.Plane[] planes = image.getPlanes();
-        ByteBuffer buffer = planes[0].getBuffer();
-        int pixelStride = planes[0].getPixelStride();
-        int rowStride = planes[0].getRowStride();
-        int width = image.getWidth();
-        int height = image.getHeight();
-
-        if (!buffer.isDirect()) {
-            byte[] rgbaData = new byte[buffer.remaining()];
-            buffer.get(rgbaData);
-            buffer.rewind();
-            return rgbaBytesToBitmap(rgbaData, width, height, pixelStride, rowStride);
-        } else {
-            // direct buffer：逐行读取
-            byte[] row = new byte[rowStride];
-            int[] argbPixels = new int[width * height];
-            for (int y = 0; y < height; y++) {
-                buffer.position(y * rowStride);
-                buffer.get(row, 0, rowStride);
-                for (int x = 0; x < width; x++) {
-                    int i = x * pixelStride;
-                    int r = row[i] & 0xFF;
-                    int g = row[i + 1] & 0xFF;
-                    int b = row[i + 2] & 0xFF;
-                    int a = row[i + 3] & 0xFF;
-                    argbPixels[y * width + x] = (a << 24) | (r << 16) | (g << 8) | b;
-                }
-            }
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            bitmap.setPixels(argbPixels, 0, width, 0, 0, width, height);
-            return bitmap;
-        }
-    }
-
-    /**
-     * 将 row-major RGBA byte 数组转为 ARGB_8888 Bitmap。
-     */
-    private Bitmap rgbaBytesToBitmap(byte[] rgbaData, int width, int height,
-                                     int pixelStride, int rowStride) {
-        int[] argbPixels = new int[width * height];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int srcIdx = y * rowStride + x * pixelStride;
-                int dstIdx = y * width + x;
-                if (srcIdx + 3 >= rgbaData.length) break;
-                int r = rgbaData[srcIdx] & 0xFF;
-                int g = rgbaData[srcIdx + 1] & 0xFF;
-                int b = rgbaData[srcIdx + 2] & 0xFF;
-                int a = rgbaData[srcIdx + 3] & 0xFF;
-                argbPixels[dstIdx] = (a << 24) | (r << 16) | (g << 8) | b;
-            }
-        }
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        bitmap.setPixels(argbPixels, 0, width, 0, 0, width, height);
-        return bitmap;
-    }
-
-    /**
-     * 将 Bitmap 以 JPEG 80% 质量写入缓存目录。
-     */
-    private void saveBitmapToCache(Bitmap bitmap) {
-        File cacheDir = getCacheDir();
-        cleanupOldCaptures(cacheDir);
-
-        String filename = "capture_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.CHINA)
-                .format(new Date()) + ".jpg";
-        File file = new File(cacheDir, filename);
-
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            boolean success = bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos);
-            if (success) {
-                Log.d(TAG, "保存帧：" + filename + " (" + file.length() / 1024 + "KB)");
-
-                // 通知 Context Builder（仅在抖音前台时推送有意义）
-                if (sContextBuilder != null) {
-                    sContextBuilder.pushScreenshot(file.getAbsolutePath());
-                }
+        if (intent == null) {
+            // START_STICKY 重启：使用保存的授权数据恢复
+            if (sSavedData != null) {
+                Log.d(TAG, "服务重启，使用保存的授权数据恢复捕获");
+                startCapture(sSavedResultCode, sSavedData);
             } else {
-                Log.w(TAG, "JPEG 压缩失败：" + filename + "，跳过推送");
+                Log.w(TAG, "服务重启但无保存的授权数据，停止服务");
+                stopSelf();
             }
-        } catch (Exception e) {
-            Log.e(TAG, "保存帧失败", e);
+            return START_STICKY;
         }
-    }
 
-    /**
-     * 缓存目录最多保留 50 个最新捕获帧，超出的删除最旧的。
-     * 使用计数器避免每次捕获都做 listFiles() I/O。
-     */
-    private void cleanupOldCaptures(File cacheDir) {
-        // 前 50 帧和之后每 10 帧才扫描一次目录，减少磁盘 I/O
-        if (mCaptureCount < 50 || mCaptureCount % 10 != 0) return;
-
-        File[] files = cacheDir.listFiles((dir, name) -> name.startsWith("capture_") && name.endsWith(".jpg"));
-        if (files == null || files.length <= 50) return;
-
-        Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-
-        int toDelete = files.length - 50;
-        for (int i = 0; i < toDelete; i++) {
-            if (files[i].delete()) {
-                Log.d(TAG, "清理旧帧：" + files[i].getName());
+        String action = intent.getAction();
+        if ("START_CAPTURE".equals(action)) {
+            int resultCode = intent.getIntExtra("resultCode", 0);
+            Intent data = intent.getParcelableExtra("data");
+            if (data != null) {
+                saveProjectionData(resultCode, data);
+                startCapture(resultCode, data);
+            } else {
+                Log.e(TAG, "START_CAPTURE 但 data 为 null");
+                stopSelf();
             }
-        }
-    }
-
-    /**
-     * 停止捕获并释放所有资源。不调用 stopSelf()，
-     * 由系统或外部主动销毁（发送 STOP_CAPTURE）驱动。
-     */
-    private void stopCapture() {
-        Log.d(TAG, "stopCapture() 被调用");
-        isRunning = false;
-
-        if (mCaptureHandler != null) {
-            mCaptureHandler.removeCallbacksAndMessages(null);
+        } else if ("STOP_CAPTURE".equals(action)) {
+            stopCapture();
+            stopSelf();
         }
 
-        if (mVirtualDisplay != null) {
-            mVirtualDisplay.release();
-            mVirtualDisplay = null;
-        }
-
-        if (mImageReader != null) {
-            mImageReader.close();
-            mImageReader = null;
-        }
-
-        if (mMediaProjection != null) {
-            mMediaProjection.stop();
-            mMediaProjection = null;
-        }
-
-        if (mCaptureThread != null) {
-            mCaptureThread.quitSafely();
-            mCaptureThread = null;
-            mCaptureHandler = null;
-        }
-
-        Log.d(TAG, "屏幕捕获已停止，本次捕获帧数：" + mCaptureCount);
-
-        // 兼容 API 34+ 和旧版本
-        if (Build.VERSION.SDK_INT >= 34) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
-        } else {
-            stopForeground(true);
-        }
-        stopSelf();
-    }
-
-    @Override
-    public void onDestroy() {
-        Log.d(TAG, "=== ScreenCaptureService 销毁 ===");
-        stopCapture();
-        // 不清除 sSavedResultCode/sSavedData，因为 START_STICKY 重启后可能还需要它们
-        super.onDestroy();
+        return START_NOT_STICKY;
     }
 
     @Override
@@ -418,29 +170,311 @@ public class ScreenCaptureService extends Service {
         return null;
     }
 
-    // ───── 通知相关 ─────
-
-    private void createNotificationChannel() {
-        NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "屏幕捕获",
-                NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("ScreenCaptureService 的前台通知");
-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        manager.createNotificationChannel(channel);
+    @Override
+    public void onDestroy() {
+        stopCapture();
+        super.onDestroy();
     }
 
-    private Notification buildNotification(String text) {
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("左右")
-                .setContentText(text)
+    // ── 捕获控制 ──
+
+    private void startCapture(int resultCode, Intent data) {
+        if (isRunning) {
+            Log.d(TAG, "捕获已在运行，忽略重复请求");
+            return;
+        }
+
+        startBackgroundThread();
+        getScreenMetrics();
+
+        MediaProjectionManager projectionManager =
+                (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (projectionManager == null) {
+            Log.e(TAG, "MediaProjectionManager 为 null");
+            stopSelf();
+            return;
+        }
+
+        mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+        if (mediaProjection == null) {
+            Log.e(TAG, "MediaProjection 为 null — 授权可能已失效，请重新授权");
+            stopSelf();
+            return;
+        }
+
+        // Android 14+ 必须在 createVirtualDisplay 之前注册 callback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            mediaProjection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    Log.d(TAG, "MediaProjection 已停止");
+                    stopCapture();
+                }
+            }, backgroundHandler);
+        }
+
+        // 创建 ImageReader
+        imageReader = ImageReader.newInstance(
+                captureWidth, captureHeight, PixelFormat.RGBA_8888, 2);
+        imageReader.setOnImageAvailableListener(reader -> {
+            // ImageReader 有新帧可用时的回调（由系统调用）
+            // 实际截帧由 scheduleNextCapture → captureFrame 驱动
+        }, backgroundHandler);
+
+        // 创建虚拟显示
+        virtualDisplay = mediaProjection.createVirtualDisplay(
+                "ZuoYouScreenCapture",
+                captureWidth, captureHeight, screenDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null, backgroundHandler);
+
+        // 预分配 Bitmap 缓冲区
+        reusableBitmap = Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888);
+
+        isRunning = true;
+        Log.d(TAG, "屏幕捕获已启动: " + captureWidth + "x" + captureHeight
+                + " @ " + screenDpi + "dpi (每 " + (CAPTURE_INTERVAL_MS / 1000) + "s 一帧)");
+
+        // 启动定时截帧
+        scheduleNextCapture();
+    }
+
+    private void stopCapture() {
+        isRunning = false;
+
+        if (virtualDisplay != null) {
+            virtualDisplay.release();
+            virtualDisplay = null;
+        }
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
+        }
+        if (mediaProjection != null) {
+            mediaProjection.stop();
+            mediaProjection = null;
+        }
+        if (reusableBitmap != null) {
+            reusableBitmap.recycle();
+            reusableBitmap = null;
+        }
+
+        stopBackgroundThread();
+        Log.d(TAG, "屏幕捕获已停止");
+    }
+
+    // ── 截帧 ──
+
+    private void scheduleNextCapture() {
+        if (!isRunning) return;
+        backgroundHandler.postDelayed(this::captureFrame, CAPTURE_INTERVAL_MS);
+    }
+
+    private void captureFrame() {
+        if (!isRunning) return;
+
+        // 仅在抖音前台时捕获
+        if (!sDouyinForeground) {
+            scheduleNextCapture();
+            return;
+        }
+
+        // acquireLatestImage() 只保留最新帧，避免队列堆积
+        if (imageReader == null) {
+            scheduleNextCapture();
+            return;
+        }
+        Image image = imageReader.acquireLatestImage();
+        if (image != null) {
+            try {
+                Bitmap bitmap = imageToBitmap(image);
+                if (bitmap != null) {
+                    String filePath = saveBitmapToCache(bitmap);
+                    if (filePath != null && sContextBuilder != null) {
+                        sContextBuilder.pushScreenshot(filePath);
+                    }
+                }
+            } finally {
+                image.close();
+            }
+        }
+
+        scheduleNextCapture();
+    }
+
+    // ── 图像处理 ──
+
+    /**
+     * 将 Image (RGBA_8888) 转为 Bitmap (ARGB_8888)。
+     *
+     * <p>注意：Image 的 R 和 B 通道与 Bitmap 相反，需要交换。
+     * 同时处理 rowStride != width * 4 的 padding 情况。
+     * 复用预分配的 {@link #reusableBitmap} 以减少 GC 压力。
+     */
+    private Bitmap imageToBitmap(Image image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        Image.Plane plane = image.getPlanes()[0];
+        java.nio.ByteBuffer buffer = plane.getBuffer();
+        int pixelStride = plane.getPixelStride();
+        int rowStride = plane.getRowStride();
+        int rowPadding = rowStride - pixelStride * width;
+
+        if (reusableBitmap == null || reusableBitmap.isRecycled()) {
+            return null;
+        }
+
+        // 复用预分配的 Bitmap — 通过 setPixels 直接写入
+        int[] pixels = new int[width * height];
+        buffer.rewind();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int offset = (y * rowStride + x * pixelStride) * 4;
+                if (offset + 3 >= buffer.limit()) break;
+                int r = buffer.get(offset) & 0xFF;
+                int g = buffer.get(offset + 1) & 0xFF;
+                int b = buffer.get(offset + 2) & 0xFF;
+                int a = buffer.get(offset + 3) & 0xFF;
+                pixels[y * width + x] = (a << 24) | (b << 16) | (g << 8) | r;
+            }
+        }
+        reusableBitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        return reusableBitmap;
+    }
+
+    /**
+     * 将 Bitmap 保存为 JPEG 到缓存目录。
+     *
+     * @return 文件路径，失败返回 null
+     */
+    private String saveBitmapToCache(Bitmap bitmap) {
+        String fileName = "capture_" + fileNameFormat.format(new Date()) + ".jpg";
+        File file = new File(getCacheDir(), fileName);
+
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            boolean success = bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
+            fos.flush();
+            if (!success) {
+                Log.e(TAG, "JPEG 压缩失败");
+                file.delete();
+                return null;
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "保存截图失败", e);
+            return null;
+        }
+
+        mCaptureCount++;
+        if (mCaptureCount % CLEANUP_EVERY_N_FRAMES == 0) {
+            cleanupOldCaptures();
+        }
+        return file.getAbsolutePath();
+    }
+
+    // ── 清理 ──
+
+    /**
+     * 保留最新 MAX_CAPTURES 帧截图，删除超出的旧文件。
+     */
+    private void cleanupOldCaptures() {
+        File cacheDir = getCacheDir();
+        File[] captures = cacheDir.listFiles((dir, name) -> name.startsWith("capture_"));
+        if (captures == null || captures.length <= MAX_CAPTURES) return;
+
+        // 按修改时间排序（最旧在前）
+        java.util.Arrays.sort(captures, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+
+        int toDelete = captures.length - MAX_CAPTURES;
+        for (int i = 0; i < toDelete; i++) {
+            if (captures[i].delete()) {
+                Log.d(TAG, "清理旧截图: " + captures[i].getName());
+            }
+        }
+    }
+
+    // ── 屏幕参数 ──
+
+    /**
+     * 获取设备屏幕参数。
+     * API 30+ 使用 WindowMetrics，旧版本使用 DisplayMetrics。
+     */
+    private void getScreenMetrics() {
+        WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        if (wm == null) {
+            // 回退默认值
+            screenWidth = 1080;
+            screenHeight = 2340;
+            screenDpi = 440;
+            captureWidth = Constants.CAPTURE_WIDTH_PX;
+            captureHeight = (int) (screenHeight * (Constants.CAPTURE_WIDTH_PX / (double) screenWidth));
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // API 30+：使用 WindowMetrics（支持折叠屏/多屏）
+            android.view.WindowMetrics metrics = wm.getCurrentWindowMetrics();
+            android.graphics.Rect bounds = metrics.getBounds();
+            screenWidth = bounds.width();
+            screenHeight = bounds.height();
+            screenDpi = getResources().getConfiguration().densityDpi;
+        } else {
+            // API < 30：使用 DisplayMetrics
+            DisplayMetrics metrics = new DisplayMetrics();
+            wm.getDefaultDisplay().getMetrics(metrics);
+            screenWidth = metrics.widthPixels;
+            screenHeight = metrics.heightPixels;
+            screenDpi = metrics.densityDpi;
+        }
+
+        captureWidth = Constants.CAPTURE_WIDTH_PX;
+        captureHeight = (int) (screenHeight * (Constants.CAPTURE_WIDTH_PX / (double) screenWidth));
+
+        Log.d(TAG, "屏幕尺寸: " + screenWidth + "x" + screenHeight + " @ " + screenDpi + "dpi");
+        Log.d(TAG, "捕获尺寸: " + captureWidth + "x" + captureHeight);
+    }
+
+    // ── 后台线程 ──
+
+    private void startBackgroundThread() {
+        backgroundThread = new android.os.HandlerThread("ScreenCaptureThread");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
+    }
+
+    private void stopBackgroundThread() {
+        if (backgroundThread != null) {
+            backgroundThread.quitSafely();
+            try {
+                backgroundThread.join(1000);
+            } catch (InterruptedException e) {
+                Log.w(TAG, "后台线程停止等待被中断");
+            }
+            backgroundThread = null;
+            backgroundHandler = null;
+        }
+    }
+
+    // ── 通知 ──
+
+    private void startForegroundNotification() {
+        NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID, "屏幕捕获服务",
+                NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription("用于 AI 视觉分析的屏幕截图");
+        channel.setShowBadge(false);
+
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) {
+            nm.createNotificationChannel(channel);
+        }
+
+        Notification notification = new Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("左右 - 屏幕捕获中")
+                .setContentText("正在为 AI 视觉分析截取屏幕画面")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .build();
-    }
 
-    private void updateNotification(String text) {
-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        manager.notify(NOTIFICATION_ID, buildNotification(text));
+        startForeground(NOTIFICATION_ID, notification);
     }
 }

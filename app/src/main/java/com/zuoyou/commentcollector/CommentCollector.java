@@ -26,7 +26,6 @@ import java.util.Locale;
 public class CommentCollector {
 
     private static final String TAG = "DouyinComment";
-    private static final String DOUYIN_PACKAGE = "com.ss.android.ugc.aweme";
 
     private final Listener listener;
 

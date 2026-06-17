@@ -127,7 +127,8 @@ public class AiPersonality {
             int rank = 1;
             for (Comment c : sorted) {
                 sb.append("[").append(rank++).append("] ")
-                        .append(c.user()).append("：").append(c.text())
+                        .append(c.user()).append("：")
+                        .append(c.text() != null ? c.text() : "(无文本)")
                         .append("（赞 ").append(c.likeCount()).append("")
                         .append(c.time() != null ? "，" + c.time() : "")
                         .append("）\n");
@@ -143,8 +144,9 @@ public class AiPersonality {
             for (int i = start; i < timeline.size(); i++) {
                 TimelineEvent e = timeline.get(i);
                 if ("comment".equals(e.type())) {
-                    String shortDetail = e.detail().length() > 30
-                            ? e.detail().substring(0, 30) + "…" : e.detail();
+                    String detail = e.detail() != null ? e.detail() : "";
+                    String shortDetail = detail.length() > 30
+                            ? detail.substring(0, 30) + "…" : detail;
                     sb.append("• 评论：").append(shortDetail).append("\n");
                 } else {
                     sb.append("• 截图\n");

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">左右</string>
-    <string name="accessibility_service_description">用于抓取抖音评论内容</string>
+    <string name="accessibility_service_description">「左右」AI 陪看助手：读取抖音评论区内容（用户、评论、点赞数），用于 AI 实时分析和陪看。仅在抖音 App 内运行，不收集其他应用数据。</string>
     <string name="start_service">开启服务</string>
     <string name="stop_service">停止服务</string>
     <string name="status_idle">等待中...</string>

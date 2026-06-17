@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ZuoYou" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <item name="colorPrimary">#FF6200</item>
-        <item name="colorPrimaryVariant">#E55A00</item>
+    <!-- 基础主题：NoActionBar，自己控制 Toolbar -->
+    <style name="Theme.ZuoYou" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">#FF6B35</item>
+        <item name="colorPrimaryVariant">#E55A2B</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#03DAC5</item>
-        <item name="colorSecondaryVariant">#018786</item>
-        <item name="colorOnSecondary">#000000</item>
+        <item name="colorSecondary">#FF8A50</item>
+        <item name="colorSecondaryVariant">#FF5722</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:statusBarColor">#FF6B35</item>
+        <item name="android:navigationBarColor">#FFF8F2</item>
+        <item name="android:windowBackground">@color/bg_cream</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- 设置页面继承同样的主题 -->
+    <style name="Theme.ZuoYou.Settings" parent="Theme.ZuoYou" />
 </resources>

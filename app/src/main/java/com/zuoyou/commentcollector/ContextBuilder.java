@@ -32,7 +32,7 @@ public class ContextBuilder {
     private final LinkedList<TimelineEvent> timeline = new LinkedList<>();
 
     private int totalCommentCount = 0;
-    private Listener listener;
+    private volatile Listener listener;
 
     // 缓存时间格式化器（非线程安全，但在单线程推送中没问题）
     private final SimpleDateFormat timestampFormat =
@@ -48,7 +48,10 @@ public class ContextBuilder {
     public void pushComments(List<Comment> comments) {
         if (comments == null || comments.isEmpty()) return;
 
-        String now = timestampFormat.format(new Date());
+        String now;
+        synchronized (timestampFormat) {
+            now = timestampFormat.format(new Date());
+        }
         synchronized (recentComments) {
             for (Comment c : comments) {
                 // 追加到环形缓冲区，超限淘汰最旧
@@ -74,7 +77,10 @@ public class ContextBuilder {
     public void pushScreenshot(String filePath) {
         if (filePath == null || filePath.isEmpty()) return;
 
-        String now = timestampFormat.format(new Date());
+        String now;
+        synchronized (timestampFormat) {
+            now = timestampFormat.format(new Date());
+        }
         synchronized (recentScreenshots) {
             recentScreenshots.addLast(filePath);
             if (recentScreenshots.size() > MAX_SCREENSHOTS) {

@@ -1,9 +1,12 @@
 package com.zuoyou.commentcollector;
 
 import android.accessibilityservice.AccessibilityService;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,7 +32,6 @@ import java.util.Objects;
 public class DouyinCommentService extends AccessibilityService {
 
     private static final String TAG = "DouyinComment";
-    private static final String DOUYIN_PACKAGE = "com.ss.android.ugc.aweme";
 
     // ── 自适应采样参数 ──
     /** 最短事件间隔（有新评论时） */
@@ -43,6 +45,8 @@ public class DouyinCommentService extends AccessibilityService {
     private long currentIntervalMs = MIN_EVENT_INTERVAL_MS;
     /** 最近一次处理事件的时间戳 */
     private long lastProcessedTime = 0;
+    /** 最近一次 STATE_CHANGED 事件的时间戳（防抖） */
+    private long lastStateChangedTime = 0;
     /** 连续无新评论的次数 */
     private int emptyWalkCount = 0;
 
@@ -79,6 +83,10 @@ public class DouyinCommentService extends AccessibilityService {
             @Override
             public void onError(String message) {
                 Log.w(TAG, "AI 服务错误: " + message);
+                // 在主线程显示 Toast，让用户知道 AI 出错了
+                new Handler(Looper.getMainLooper()).post(() ->
+                        Toast.makeText(DouyinCommentService.this,
+                                "AI 错误: " + message, Toast.LENGTH_SHORT).show());
             }
         });
         contextBuilder.setListener(aiService);
@@ -124,12 +132,19 @@ public class DouyinCommentService extends AccessibilityService {
         if (event == null) return;
 
         String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "";
-        if (!packageName.equals(DOUYIN_PACKAGE)) return;
+        if (!packageName.equals(Constants.DOUYIN_PACKAGE)) return;
+
+        // 通知 ScreenCaptureService：抖音在前台
+        ScreenCaptureService.setDouyinForeground(true);
 
         int eventType = event.getEventType();
 
         // ── 窗口切换（翻视频）→ 立即重置采样 + 去重缓存 ──
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            long now = System.currentTimeMillis();
+            // 防抖：300ms 内的连续 STATE_CHANGED 事件只处理一次
+            if (now - lastStateChangedTime < MIN_EVENT_INTERVAL_MS) return;
+            lastStateChangedTime = now;
             // 重置自适应采样
             currentIntervalMs = MIN_EVENT_INTERVAL_MS;
             emptyWalkCount = 0;
@@ -139,13 +154,13 @@ public class DouyinCommentService extends AccessibilityService {
             if (aiService != null) {
                 aiService.resetVideoContext();
             }
-            lastProcessedTime = System.currentTimeMillis();
+            lastProcessedTime = now;
             Log.d(TAG, "窗口切换，重置采样间隔至 " + MIN_EVENT_INTERVAL_MS + "ms，清空去重缓存");
             // 立即执行一次树遍历，不要被防抖挡住
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
                 CharSequence rootPkg = rootNode.getPackageName();
-                if (rootPkg != null && rootPkg.toString().equals(DOUYIN_PACKAGE)) {
+                if (rootPkg != null && rootPkg.toString().equals(Constants.DOUYIN_PACKAGE)) {
                     collector.collect(rootNode);
                 }
                 rootNode.recycle();
@@ -164,7 +179,7 @@ public class DouyinCommentService extends AccessibilityService {
         if (rootNode == null) return;
 
         CharSequence rootPkg = rootNode.getPackageName();
-        if (rootPkg == null || !rootPkg.toString().equals(DOUYIN_PACKAGE)) {
+        if (rootPkg == null || !rootPkg.toString().equals(Constants.DOUYIN_PACKAGE)) {
             rootNode.recycle();
             return;
         }
@@ -180,6 +195,8 @@ public class DouyinCommentService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        // 抖音前台标志重置
+        ScreenCaptureService.setDouyinForeground(false);
         if (aiService != null) {
             aiService.shutdown();
         }
