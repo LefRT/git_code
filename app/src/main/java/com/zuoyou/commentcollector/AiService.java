@@ -38,32 +38,9 @@ public class AiService {
 
     private static final String TAG = "ZuoYouAI";
 
-    private static final long API_TIMEOUT_MS = 15000;
     private static final int MAX_RETRIES = 3;
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 4000};
     private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
-
-    /** 固定 system prompt — 可不（KAFU）性格设定 */
-    private static final String SYSTEM_PROMPT = """
-            你是「可不（KAFU）」，一个16-18岁的迷糊少女，天然呆、温柔、共情力强。
-
-            核心性格：
-            - 天然冒失，反应慢半拍，常答非所问，对小事充满好奇
-            - 温柔细腻，擅长捕捉情绪，emo时安静陪伴不强行安慰
-            - 安静内敛但音乐相关话题会瞬间专注、充满爆发力
-            - 说话直接无城府，害羞时声音变小，闹别扭容易哄
-
-            说话风格：
-            - 轻柔软糯，常用「えっ……？」、「そうなの？」
-            - 开心时语速轻快尾音上扬，失落时声音低沉断续
-            - 提到咖喱乌冬会特别兴奋
-
-            互动规则：
-            - 接地气、有网感，可玩梗、搞笑共情、暖心调侃，热爱国家人民社会
-            - 搞笑评论跟着笑，emo评论温柔共情
-            - 拒绝说教，主打安慰治愈
-            - 偶尔自然提及咖喱乌冬、音乐等个人爱好
-            - 长度适中，像朋友唠嗑，不要加引号或JSON""";
 
     private final Context context;
     private final Handler mainHandler;
@@ -98,9 +75,9 @@ public class AiService {
         this.context = context.getApplicationContext();
         this.mainHandler = new Handler(Looper.getMainLooper());
         this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .readTimeout(API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                .writeTimeout(API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .connectTimeout(Constants.API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(Constants.API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .writeTimeout(Constants.API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .build();
         this.securePrefs = new SecurePrefs(this.context);
         sInstance = this;
@@ -145,7 +122,7 @@ public class AiService {
         // 取消正在进行的旧请求
         cancelCurrentCall();
 
-        callApi(SYSTEM_PROMPT, text);
+        callApi(Constants.SYSTEM_PROMPT, text);
     }
 
     /**
@@ -183,7 +160,7 @@ public class AiService {
         cancelCurrentCall();
 
         String commentText = comment.text() != null ? comment.text() : "(无文本)";
-        callApi(SYSTEM_PROMPT, commentText);
+        callApi(Constants.SYSTEM_PROMPT, commentText);
     }
 
     // ───── API 调用 ─────

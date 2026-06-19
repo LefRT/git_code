@@ -38,6 +38,18 @@ adb logcat -s ZuoYouAI
 # View floating window logs
 adb logcat -s ZuoYouFloat
 
+# View chat service logs
+adb logcat -s ChatAiService
+
+# View music player logs
+adb logcat -s MusicPlayer
+
+# View animation logs
+adb logcat -s AnimationPlayer
+
+# View memory collector logs
+adb logcat -s MemoryCollector
+
 # Clear logcat buffer
 adb logcat -c
 
@@ -66,15 +78,24 @@ app/src/main/java/com/zuoyou/commentcollector/
 ├── CommentCollector.java        # Phase 1 — tree traversal + parsing + JSON (extracted from service)
 ├── CommentDiffer.java           # Comment diff algorithm + smart scoring
 ├── CommentParser.java           # Phase 1 — pure-Java contentDescription parser
-├── Constants.java               # Global constants (prefs keys, package names, defaults)
-├── ContextBuilder.java          # Phase 3 — fused pipeline (comments + screenshots + timeline)
-├── DouyinCommentService.java    # AccessibilityService — 5s timer + three-state diff + AI trigger
+├── Constants.java               # Global constants (prefs keys, package names, defaults, SYSTEM_PROMPT)
+├── ContextBuilder.java          # Phase 3 — fused pipeline (comments + screenshots + timeline + video description)
+├── DouyinCommentService.java    # AccessibilityService — 5s timer + three-state diff + AI trigger + video description extraction + memory collection
 ├── ScreenCaptureService.java    # Phase 2 — MediaProjection screen capture service
 ├── SecurePrefs.java             # EncryptedSharedPreferences wrapper for API Key storage
-├── AiService.java               # DeepSeek API client (KAFU persona prompt + retry + cancel safety)
+├── AiService.java               # DeepSeek API client (comment evaluation, retry + cancel safety)
 ├── FloatingWindowService.java   # System overlay — bubble / comment list / evaluation card
 ├── SettingsActivity.java        # Accessibility service toggle + API key config
-└── MainActivity.java            # Launcher — DrawerLayout with service controls
+├── MainActivity.java            # Launcher — DrawerLayout with service controls + chat history + memory toggle
+└── feature/
+    ├── ChatActivity.java        # 全屏聊天界面 — RecyclerView + 消息气泡 + 打字指示器
+    ├── ChatAiService.java       # 聊天 AI 服务 — 完整对话历史 + 记忆上下文注入
+    ├── ChatSessionManager.java  # JSON 文件持久化聊天记录（索引 + 会话文件）
+    ├── MainImageHandler.java    # 主界面手势 — 双击→动画→聊天，左滑→音乐菜单
+    ├── AnimationPlayer.java     # MP4 片头动画 — SurfaceView 覆盖层播放
+    ├── MusicPlayer.java         # 音乐播放器 — MediaPlayer 单例 + 多监听器 + 封面联动
+    ├── MusicMenuPopup.java      # 音乐菜单弹窗 — PopupWindow 歌曲列表
+    └── MemoryCollector.java     # 记忆收集器 — 采集视频简介 + 高赞评论 → AI 上下文注入
 
 app/src/test/java/com/zuoyou/commentcollector/
 └── CommentParserTest.java       # Unit tests for CommentParser (25 test cases)
@@ -201,6 +222,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 | 2 | MediaProjection (screen capture) | ✅ Done |
 | 3 | Context Builder (fuse text + vision via ring buffers) | ✅ Done |
 | 4 | AI service + floating window (comment list + evaluation) | ✅ Done |
+| 2+ | AI Chat + Music Player + Animation + Memory | ✅ Done (UI待调) |
 | 5 | Physical robot (ESP32-S3) | ❌ Pending |
 
 ### Optimization history (2026-06-16)
@@ -274,6 +296,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 - `<queries>` targeting `com.ss.android.ugc.aweme` — Android 11+ package visibility
 - AccessibilityService bound with `BIND_ACCESSIBILITY_SERVICE`
 - FloatingWindowService 声明 `<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE">` — Android 14+
+- `ChatActivity` — `android:exported="false"`, `android:theme="@style/Theme.ZuoYou"`
 
 ## Accessibility Config (`accessibility_service_config.xml`)
 
@@ -402,6 +425,15 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 | `api_key` | "" | DeepSeek API Key | `SecurePrefs`（AES-256 加密） |
 | `api_base_url` | `https://api.deepseek.com/v1` | API 地址 | 普通 SharedPreferences |
 | `model_name` | `deepseek-chat` | 模型名 | 普通 SharedPreferences |
+| `memory_collection_enabled` | false | 记忆收集开关 | 普通 SharedPreferences |
+
+### 共享常量（Constants.java）
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `SYSTEM_PROMPT` | KAFU 角色设定文本 | AiService + ChatAiService 共用 |
+| `API_TIMEOUT_MS` | 15000 | OkHttp 超时（AiService + ChatAiService 共用） |
+| `CHAT_HISTORY_MAX_MESSAGES` | 40 | 聊天历史最大消息数（避免 API token 溢出） |
 
 ### 新依赖
 
@@ -444,6 +476,121 @@ bg_header.xml, bg_settings_header.xml, bg_button_orange.xml, bg_button_blue.xml,
 **新增的 drawable 文件（6个）：**
 bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_item.xml, selector_drawer_item.xml, ic_menu.xml
 
+## Phase 2+: AI Chat + Music Player + Animation + Memory (2026-06-20)
+
+### 概述
+
+在 Phase 4 基础上新增三大交互功能：AI 聊天、音乐播放、片头动画，以及记忆收集系统。
+
+### 主界面手势（MainImageHandler）
+
+- **双击角色图片** → 播放 MP4 片头动画（AnimationPlayer）→ 动画完成进入聊天（ChatActivity）
+- **左滑角色图片**（velocityX < -1000）→ 弹出音乐菜单（MusicMenuPopup）
+- 防重入：动画播放中忽略双击
+- 角色图片 ImageView 引用缓存在构造函数中（不使用 `content.getChildAt(0)`，避免拿到 DrawerLayout）
+
+### AI 聊天（ChatActivity + ChatAiService）
+
+**ChatActivity** — 全屏聊天界面：
+- 布局：顶栏（返回+标题）→ 角色头像（100dp）→ 分割线 → RecyclerView → 输入框+发送按钮
+- 3 种消息类型：用户（右对齐蓝色气泡）、AI（左对齐白色气泡）、打字指示器（···）
+- 接收 `EXTRA_SESSION_ID`（-1=新建会话）
+- 消息流程：保存用户消息 → 显示打字指示器 → 调用 AI → 保存回复 → 刷新列表
+
+**ChatAiService** — DeepSeek API 聊天客户端：
+- 与 AiService 的区别：支持完整消息历史 + 记忆上下文注入 + 单次请求不重试
+- 消息数组：[system prompt, memory context, history..., user message]
+- 历史消息上限：`Constants.CHAT_HISTORY_MAX_MESSAGES`（40 条），避免超出 API token 限制
+- 使用共享 `Constants.SYSTEM_PROMPT`（不再重复定义）
+
+**ChatSessionManager** — JSON 文件持久化：
+- 文件结构：`getFilesDir()/chats/chat_index.json` + `chat_N.json`
+- 所有公开方法 `synchronized` 保护线程安全
+- 内部记录：`ChatMessage(role, content, timestamp)` 和 `SessionInfo(id, preview, count, updatedAt)`
+
+### 音乐播放（MusicPlayer + MusicMenuPopup）
+
+**MusicPlayer** — MediaPlayer 单例：
+- 双重检查锁定单例模式
+- 多监听器支持：`CopyOnWriteArrayList<MusicListener>` + `addListener()`/`removeListener()`
+- 封面联动：播放某首歌时通知所有监听器切换封面图
+- 5 首歌曲：`R.drawable.cover_01~05`（封面）+ `R.raw.song_01~05`（音频）
+- 方法：`init(context)`、`play(index)`、`pause()`、`resume()`、`stop()`、`togglePlayPause()`
+
+**MusicMenuPopup** — PopupWindow 浮窗：
+- 纯代码构建（无 XML），白色圆角卡片风格
+- 歌曲列表：封面小图 + 歌名 + 歌手 + 播放指示（▶/❚❚）
+- 播放/暂停按钮
+- 使用 `addListener()`/`removeListener()` 模式，dismiss 时移除监听器
+
+### 片头动画（AnimationPlayer）
+
+- 在 ImageView 位置覆盖 SurfaceView 播放 MP4（`R.raw.animation_intro`）
+- 通过 `anchor.getLocationOnScreen()` 定位，覆盖在角色图片上方
+- `sPlaying` 为 `volatile static boolean`，在 SurfaceView 创建成功后才设为 true
+- 播放完成/失败 → 移除 SurfaceView → 触发回调
+- 播放期间拦截触摸事件
+
+### 记忆收集（MemoryCollector）
+
+- 从 ContextBuilder 采集视频简介（最多 5 条）和高赞评论（likeCount > 50，最多 20 条）
+- 由 `DouyinCommentService` 5 秒定时器调用 `tryCollect()`
+- 数据持久化到 `memory_data.json`，Activity 重建不丢失
+- 所有公开方法 `synchronized` 保护线程安全
+- `buildMemoryContext()` 生成文本块供 ChatAiService 注入 AI 上下文
+- 开关存储在 SharedPreferences（`KEY_MEMORY_ENABLED`）
+
+### 视频简介提取（DouyinCommentService）
+
+- 在 `extractRecursive()` 中通过状态机提取视频简介
+- 状态机：找到 `@` 作者行 → 标记 `pendingDescription` → 取后续最长文本（>20 字，排除"相关"/"推荐"前缀）
+- 提取结果通过 `ContextBuilder.setVideoDescription()` 共享
+
+### 左侧抽屉（聊天记录）
+
+- `activity_main.xml` 新增 `chatDrawerView`（左抽屉）
+- 显示聊天记录列表（序号 + 时间 + 预览 + 消息数）
+- "+ 新聊天" 按钮创建新会话
+- 点击已有会话打开 ChatActivity
+- `onResume()` 时刷新列表
+
+### 右侧抽屉（记忆收集开关）
+
+- 新增记忆收集开关区域（标题 + 状态 + 开启/关闭按钮）
+- 点击切换开关状态
+
+### 新增布局文件
+
+| 文件 | 用途 |
+|------|------|
+| `activity_chat.xml` | 聊天界面布局 |
+| `item_chat_user.xml` | 用户消息气泡（右对齐蓝色） |
+| `item_chat_ai.xml` | AI 消息气泡（左对齐白色带边框） |
+| `item_chat_typing.xml` | 打字指示器 ··· |
+| `bg_chat_bubble_user.xml` | 用户气泡背景（蓝色圆角） |
+| `bg_chat_bubble_ai.xml` | AI 气泡背景（白色圆角+边框） |
+| `bg_chat_input.xml` | 输入框背景 |
+| `ic_back.xml` | 返回箭头图标 |
+
+### 新增资源文件
+
+| 文件 | 用途 |
+|------|------|
+| `cover_01~05.jpg` | 5 首歌曲封面图（drawable） |
+| `song_01~05.mp3` | 5 首歌曲音频（raw） |
+| `animation_intro.mp4` | 片头动画（raw） |
+
+### Logcat 标签
+
+| Tag | 来源 | 用途 |
+|-----|------|------|
+| `ChatActivity` | ChatActivity | 聊天界面生命周期 |
+| `ChatAiService` | ChatAiService | 聊天 AI 调用日志 |
+| `ChatSession` | ChatSessionManager | 会话持久化日志 |
+| `MusicPlayer` | MusicPlayer | 音乐播放状态日志 |
+| `AnimationPlayer` | AnimationPlayer | 动画播放日志 |
+| `MemoryCollector` | MemoryCollector | 记忆采集日志 |
+
 ## Code Review Fixes (2026-06-19) — 15 findings + UI redesign
 
 **ContextBuilder fixes:**
@@ -481,3 +628,42 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 - **Adaptive width**: Card width 200~360dp based on `Paint.measureText()` of longest text line
 - **Adaptive display time**: Auto-dismiss = `clamp(chars x 45ms + 2000ms, 2.5s, 12s)`
 - **Typing indicator**: Three bouncing dots during AI thinking, hidden on real response
+
+## Code Review Fixes (2026-06-20) — Phase 2+ hardening
+
+**MusicPlayer fixes:**
+- **Multi-listener**: Changed from single `volatile MusicListener` to `CopyOnWriteArrayList<MusicListener>` with `addListener()`/`removeListener()`. Prevents MusicMenuPopup from overwriting MainActivity's cover-image listener.
+- **Thread safety**: `isPlaying()` now `synchronized` — prevents NPE/ISE race with `release()`.
+- **Cleanup**: `release()` clears listener list.
+
+**MusicMenuPopup fixes:**
+- **Listener lifecycle**: Uses `addListener()` in `show()`, `removeListener()` in `dismiss()`. No longer permanently overwrites MainActivity's listener.
+
+**AnimationPlayer fixes:**
+- **sPlaying volatile**: Field made `volatile` for cross-thread visibility.
+- **sPlaying inside try**: `sPlaying = true` moved after `content.addView()` inside the try block. OOM during SurfaceView creation no longer leaves sPlaying stuck true.
+
+**MainImageHandler fixes:**
+- **Cached ImageView**: Constructor caches the `imageView` reference. `onDoubleTap()` and `onFling()` no longer use `content.getChildAt(0)` which returned DrawerLayout instead of ImageView.
+
+**MemoryCollector fixes:**
+- **Thread safety**: All public methods `synchronized`. Prevents `ConcurrentModificationException` on LinkedHashMaps.
+- **Persistence**: Data saved to `memory_data.json`. Survives Activity recreation (device rotation).
+- **Singleton guard**: Constructor preserves existing instance data instead of overwriting.
+
+**ChatAiService fixes:**
+- **History limit**: Caps to last `CHAT_HISTORY_MAX_MESSAGES` (40) messages. Prevents API token overflow.
+- **Shared constants**: Uses `Constants.SYSTEM_PROMPT` and `Constants.API_TIMEOUT_MS`.
+
+**AiService fixes:**
+- **Shared constants**: Uses `Constants.SYSTEM_PROMPT` and `Constants.API_TIMEOUT_MS`. No more duplicate definitions.
+
+**DouyinCommentService fixes:**
+- **dumpRecursive try-catch**: Node property reads (`getClassName`, `getText`, etc.) wrapped in try-catch per CLAUDE.md convention.
+- **Memory collection timer**: `MemoryCollector.tryCollect()` called in `doTimerTick()` after screen capture. Memory feature now functional.
+
+**Constants.java additions:**
+- `SYSTEM_PROMPT` — shared KAFU persona text (AiService + ChatAiService)
+- `API_TIMEOUT_MS` — shared OkHttp timeout (15000ms)
+- `CHAT_HISTORY_MAX_MESSAGES` — chat history cap (40 messages)
+- `KEY_MEMORY_ENABLED` — memory collection toggle key

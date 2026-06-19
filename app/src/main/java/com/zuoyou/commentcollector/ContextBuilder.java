@@ -44,6 +44,9 @@ public class ContextBuilder {
     /** 当前屏幕上的完整评论列表（每轮 doTimerTick 更新） */
     private volatile List<Comment> currentVisibleComments = List.of();
 
+    /** 当前视频简介 */
+    private volatile String currentVideoDescription = "";
+
     /** 悬浮窗显示的评论数量上限（避免无滚动列表溢出屏幕） */
     private static final int FLOATING_WINDOW_MAX_COMMENTS = 10;
 
@@ -153,6 +156,29 @@ public class ContextBuilder {
      */
     public void setCurrentVisibleComments(List<Comment> comments) {
         currentVisibleComments = comments != null ? List.copyOf(comments) : List.of();
+    }
+
+    /**
+     * 设置当前视频简介。
+     */
+    public void setVideoDescription(String description) {
+        currentVideoDescription = description != null ? description : "";
+    }
+
+    /**
+     * 获取当前视频简介。
+     */
+    public String getVideoDescription() {
+        return currentVideoDescription;
+    }
+
+    /**
+     * 静态入口：获取当前视频简介。
+     */
+    public static String getVideoDescriptionStatic() {
+        ContextBuilder instance = sInstance;
+        if (instance == null) return "";
+        return instance.getVideoDescription();
     }
 
     /**

@@ -75,6 +75,12 @@
             android:exported="false"
             android:theme="@style/Theme.ZuoYou" />
 
+        <!-- 聊天界面 -->
+        <activity
+            android:name=".feature.ChatActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ZuoYou" />
+
     </application>
 
 </manifest>

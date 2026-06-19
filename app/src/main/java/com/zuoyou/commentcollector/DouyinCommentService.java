@@ -8,6 +8,8 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
+import com.zuoyou.commentcollector.feature.MemoryCollector;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,7 +18,7 @@ import java.util.List;
  *
  * <p>每 5 秒执行一轮：
  * <ol>
- *   <li>遍历节点树提取评论列表</li>
+ *   <li>遍历节点树提取评论列表 + 视频简介</li>
  *   <li>与上轮对比 → 判断有无新评论（三态）</li>
  *   <li>如有新评论 → 评分筛选最佳 1 条 → 推送 AI</li>
  *   <li>截屏一次</li>
@@ -159,8 +161,16 @@ public class DouyinCommentService extends AccessibilityService {
         }
 
         try {
-            // 1. 提取当前评论列表
+            // 如果有待处理的节点导出请求，先执行
+            performNodeDumpIfRequested();
+
+            // 1. 提取当前评论列表 + 视频简介（在同一次遍历中完成）
             List<Comment> currentComments = extractComments(rootNode);
+
+            // 更新视频简介到 ContextBuilder
+            if (!currentDescription.isEmpty()) {
+                contextBuilder.setVideoDescription(currentDescription);
+            }
 
             // 2. 与上轮对比
             CommentDiffer.DiffResult diff = CommentDiffer.diff(previousComments, currentComments);
@@ -203,6 +213,9 @@ public class DouyinCommentService extends AccessibilityService {
         if (ScreenCaptureService.isRunning) {
             ScreenCaptureService.captureOnce();
         }
+
+        // 7. 记忆收集（采集视频简介 + 高赞评论）
+        MemoryCollector.tryCollect();
     }
 
     /**
@@ -210,16 +223,34 @@ public class DouyinCommentService extends AccessibilityService {
      */
     private List<Comment> extractComments(AccessibilityNodeInfo rootNode) {
         List<Comment> comments = new ArrayList<>();
+        currentDescription = "";
+        bestDescription = "";
+        pendingDescription = false;
         extractRecursive(rootNode, comments);
+        if (!bestDescription.isEmpty()) {
+            currentDescription = bestDescription;
+            Log.d(TAG, "视频简介(" + currentDescription.length() + "字): " + currentDescription);
+        }
         return comments;
     }
 
+    /** 在本轮遍历中找到的视频简介（由 extractRecursive 填充） */
+    private String currentDescription = "";
+    /** 遍历标记：刚遇到了 @ 作者行 */
+    private boolean pendingDescription = false;
+    /** 遍历中收集的最长候选简介 */
+    private String bestDescription = "";
+
     /**
-     * 递归遍历节点树提取评论（与 CommentCollector 逻辑一致，但直接返回列表）。
+     * 递归遍历节点树提取评论 + 视频简介。
+     *
+     * 评论：找 contentDescription 含「回复 按钮」的 FrameLayout。
+     * 视频简介：状态机找 @ 作者行后最长的文本。
      */
     private void extractRecursive(AccessibilityNodeInfo node, List<Comment> comments) {
         if (node == null) return;
 
+        // ── 提取评论 ──
         CharSequence desc = node.getContentDescription();
         if (desc != null && desc.toString().contains("回复 按钮")) {
             Comment partial = CommentParser.parseFromDescription(desc.toString());
@@ -229,6 +260,22 @@ public class DouyinCommentService extends AccessibilityService {
             }
         }
 
+        // ── 提取视频简介 ──
+        // 状态机：找到 @ 作者行后，取后续所有长文本中最长的那个
+        CharSequence nodeText = node.getText();
+        if (nodeText != null && nodeText.length() > 0) {
+            String text = nodeText.toString();
+            if (text.charAt(0) == '@') {
+                pendingDescription = true;
+            } else if (pendingDescription && text.length() > 20
+                    && !text.startsWith("相关") && !text.startsWith("推荐")) {
+                if (text.length() > bestDescription.length()) {
+                    bestDescription = text;
+                }
+            }
+        }
+
+        // ── 递归遍历子节点 ──
         int childCount = safeGetChildCount(node);
         for (int i = 0; i < childCount; i++) {
             AccessibilityNodeInfo child = null;
@@ -290,11 +337,87 @@ public class DouyinCommentService extends AccessibilityService {
         return 0;
     }
 
-    private int safeGetChildCount(AccessibilityNodeInfo node) {
+    private static int safeGetChildCount(AccessibilityNodeInfo node) {
         try {
             return node.getChildCount();
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    // ───── 节点探索工具（供 MainActivity 长按触发） ─────
+
+    private static volatile boolean sDumpRequested = false;
+
+    /**
+     * 从 MainActivity 触发：请求在下次检测到抖音窗口时自动导出节点树。
+     */
+    public static void requestNodeDump() {
+        sDumpRequested = true;
+        Log.d(TAG, "节点导出已请求，请在 5 秒内切换到抖音");
+    }
+
+    /**
+     * 在 onAccessibilityEvent 中检测到抖音时调用。
+     */
+    private void performNodeDumpIfRequested() {
+        if (!sDumpRequested) return;
+        sDumpRequested = false;
+
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            Log.w(TAG, "performNodeDumpIfRequested: rootNode is null");
+            return;
+        }
+        try {
+            CharSequence rootPkg = root.getPackageName();
+            if (rootPkg != null && !rootPkg.toString().equals(Constants.DOUYIN_PACKAGE)) {
+                // 不是抖音，重新设标记等下一轮
+                sDumpRequested = true;
+                return;
+            }
+            Log.d(TAG, "══════ 抖音节点树（仅含文字内容） ══════");
+            dumpRecursive(root, 0);
+            Log.d(TAG, "══════ 节点树结束 ══════");
+        } finally {
+            root.recycle();
+        }
+    }
+
+    private static void dumpRecursive(AccessibilityNodeInfo node, int depth) {
+        if (node == null) return;
+
+        try {
+            String indent = "  ".repeat(depth);
+            String className = node.getClassName() != null ? node.getClassName().toString() : "null";
+            CharSequence desc = node.getContentDescription();
+            CharSequence text = node.getText();
+            boolean visible = node.isVisibleToUser();
+
+            if (!visible) return;
+
+            boolean hasContent = (desc != null && desc.length() > 0) || (text != null && text.length() > 0);
+            if (hasContent) {
+                Log.d(TAG, indent + "[" + className + "]" +
+                        (desc != null ? " desc=" + desc : "") +
+                        (text != null ? " text=" + text : ""));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "dumpRecursive 读取节点属性异常 at depth=" + depth, e);
+            return;
+        }
+
+        int count = safeGetChildCount(node);
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo child = null;
+            try {
+                child = node.getChild(i);
+                if (child != null) dumpRecursive(child, depth + 1);
+            } catch (Exception e) {
+                Log.w(TAG, "dumpRecursive 异常 at depth=" + depth, e);
+            } finally {
+                if (child != null) child.recycle();
+            }
         }
     }
 

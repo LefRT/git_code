@@ -31,8 +31,9 @@
                 android:scaleType="center" />
         </FrameLayout>
 
-        <!-- 展示图片 -->
+        <!-- 展示图片（双击→聊天，左滑→音乐） -->
         <ImageView
+            android:id="@+id/characterImage"
             android:layout_width="280dp"
             android:layout_height="280dp"
             android:layout_gravity="center_horizontal"
@@ -55,6 +56,61 @@
             android:letterSpacing="0.1" />
 
 
+    </LinearLayout>
+
+    <!-- ═══ 左侧抽屉：聊天记录 ═══ -->
+    <LinearLayout
+        android:id="@+id/chatDrawerView"
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:orientation="vertical"
+        android:background="@color/drawer_bg"
+        android:elevation="8dp"
+        android:paddingTop="48dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <!-- 标题 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="聊天记录"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary"
+            android:layout_marginBottom="16dp"
+            android:layout_marginStart="8dp" />
+
+        <!-- 会话列表容器 -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/chatHistoryContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <!-- 新聊天按钮 -->
+        <TextView
+            android:id="@+id/newChatButton"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_button_primary"
+            android:text="+ 新聊天"
+            android:textSize="14sp"
+            android:textColor="@color/text_on_primary"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="16dp"
+            android:clickable="true"
+            android:focusable="true" />
     </LinearLayout>
 
     <!-- ═══ 右侧抽屉 ═══ -->
@@ -170,6 +226,69 @@
                 android:textSize="12sp"
                 android:textColor="@color/text_hint"
                 android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <!-- 分割线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/drawer_divider"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- ═══ 记忆收集开关 ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/selector_drawer_item"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="记忆收集"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary" />
+
+                    <TextView
+                        android:id="@+id/drawerMemoryStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="关闭"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_hint"
+                        android:layout_marginTop="2dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/drawerMemoryToggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:background="@drawable/bg_button_primary"
+                    android:text="开启"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
         </LinearLayout>
 
     </LinearLayout>

@@ -10,7 +10,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.ViewGroup;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -20,16 +24,32 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 
+import com.zuoyou.commentcollector.feature.ChatActivity;
+import com.zuoyou.commentcollector.feature.MainImageHandler;
+import com.zuoyou.commentcollector.feature.MemoryCollector;
+import com.zuoyou.commentcollector.feature.MusicPlayer;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "ZuoYouMain";
 
     private DrawerLayout drawerLayout;
     private LinearLayout drawerView;
+    private LinearLayout chatDrawerView;
 
     // 侧边栏合并服务开关
     private TextView drawerServiceStatus;
     private TextView drawerServiceToggle;
+
+    // 记忆收集
+    private TextView drawerMemoryToggle;
+    private TextView drawerMemoryStatus;
+
+    // 聊天记录
+    private LinearLayout chatHistoryContainer;
+
+    // 手势处理器
+    private MainImageHandler imageHandler;
 
     /** 用于延迟更新抽屉状态（服务停止是异步的） */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -88,19 +108,73 @@ public class MainActivity extends AppCompatActivity {
 
         drawerLayout = findViewById(R.id.drawerLayout);
         drawerView = findViewById(R.id.drawerView);
+        chatDrawerView = findViewById(R.id.chatDrawerView);
 
         // 侧边栏视图绑定
         drawerServiceStatus = findViewById(R.id.drawerServiceStatus);
         drawerServiceToggle = findViewById(R.id.drawerServiceToggle);
 
+        // 记忆收集
+        drawerMemoryToggle = findViewById(R.id.drawerMemoryToggle);
+        drawerMemoryStatus = findViewById(R.id.drawerMemoryStatus);
+        MemoryCollector memoryCollector = new MemoryCollector(this);
+        updateMemoryToggle(memoryCollector);
+        drawerMemoryToggle.setOnClickListener(v -> {
+            boolean newState = !memoryCollector.isEnabled();
+            memoryCollector.setEnabled(newState);
+            updateMemoryToggle(memoryCollector);
+        });
+
+        // 聊天记录
+        chatHistoryContainer = findViewById(R.id.chatHistoryContainer);
+        TextView newChatButton = findViewById(R.id.newChatButton);
+        newChatButton.setOnClickListener(v -> {
+            drawerLayout.closeDrawer(chatDrawerView);
+            Intent intent = new Intent(this, ChatActivity.class);
+            intent.putExtra(ChatActivity.EXTRA_SESSION_ID, -1);
+            startActivity(intent);
+        });
+
+        // 左侧抽屉：菜单按钮长按打开聊天记录
+        // （单击仍打开右侧抽屉，双击图片进入聊天）
+
+        // 双击/左滑手势
+        ImageView characterImage = findViewById(R.id.characterImage);
+        imageHandler = new MainImageHandler(this, characterImage);
+
+        // 音乐播放器初始化
+        MusicPlayer.getInstance().init(this);
+        MusicPlayer.getInstance().addListener(new MusicPlayer.MusicListener() {
+            @Override
+            public void onSongChanged(MusicPlayer.SongInfo song) {
+                runOnUiThread(() -> {
+                    if (song != null) {
+                        characterImage.setImageResource(song.coverResId());
+                    } else {
+                        characterImage.setImageResource(R.drawable.home_showcase);
+                    }
+                });
+            }
+
+            @Override
+            public void onPlayStateChanged(boolean isPlaying) {
+                // 播放状态变化时无需特殊处理
+            }
+        });
+
         // Android 13+ 需要 POST_NOTIFICATIONS 权限来显示前台通知
         requestNotificationPermission();
 
-        // ── 菜单按钮：打开侧边栏 ──
+        // ── 菜单按钮：单击打开侧边栏，长按导出节点树 ──
         ImageButton menuButton = findViewById(R.id.menuButton);
         menuButton.setOnClickListener(v -> {
             updateDrawerStatus();
             drawerLayout.openDrawer(drawerView);
+        });
+        menuButton.setOnLongClickListener(v -> {
+            DouyinCommentService.requestNodeDump();
+            Toast.makeText(this, "已请求节点导出，请切换到抖音", Toast.LENGTH_SHORT).show();
+            return true;
         });
 
         // ── 合并服务开关：悬浮窗 + 屏幕捕获 ──
@@ -153,6 +227,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         updateDrawerStatus();
+        refreshChatHistoryList();
     }
 
     /**
@@ -238,6 +313,128 @@ public class MainActivity extends AppCompatActivity {
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+        }
+    }
+
+    /**
+     * 更新记忆收集开关 UI。
+     */
+    private void updateMemoryToggle(MemoryCollector collector) {
+        boolean enabled = collector.isEnabled();
+        drawerMemoryToggle.setText(enabled ? "关闭" : "开启");
+        drawerMemoryToggle.setBackgroundResource(enabled ? R.drawable.bg_button_close : R.drawable.bg_button_primary);
+        drawerMemoryStatus.setText(enabled
+                ? "已采集 " + collector.getDescriptionCount() + " 简介, " + collector.getHighLikeCommentCount() + " 评论"
+                : "关闭");
+    }
+
+    /**
+     * 刷新左侧抽屉的聊天记录列表。
+     */
+    private void refreshChatHistoryList() {
+        if (chatHistoryContainer == null) return;
+        chatHistoryContainer.removeAllViews();
+
+        com.zuoyou.commentcollector.feature.ChatSessionManager sessionMgr =
+                new com.zuoyou.commentcollector.feature.ChatSessionManager(this);
+        java.util.List<com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo> sessions =
+                sessionMgr.getSessionList();
+
+        if (sessions.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("暂无聊天记录");
+            empty.setTextSize(14);
+            empty.setTextColor(0xFFA8C0D0);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, dpToPx(32), 0, 0);
+            chatHistoryContainer.addView(empty);
+            return;
+        }
+
+        for (com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo session : sessions) {
+            LinearLayout item = createChatHistoryItem(session);
+            chatHistoryContainer.addView(item);
+        }
+    }
+
+    private LinearLayout createChatHistoryItem(com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo session) {
+        int padPx = dpToPx(12);
+
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setPadding(padPx, padPx, padPx, padPx);
+        item.setBackgroundResource(R.drawable.selector_drawer_item);
+        item.setClickable(true);
+        item.setFocusable(true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dpToPx(4);
+        item.setLayoutParams(lp);
+
+        // 标题行：序号 + 时间
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView idText = new TextView(this);
+        idText.setText("#" + session.id());
+        idText.setTextSize(14);
+        idText.setTextColor(0xFF7EB6D9);
+        idText.setTypeface(null, android.graphics.Typeface.BOLD);
+        header.addView(idText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView timeText = new TextView(this);
+        timeText.setText(session.updatedAt());
+        timeText.setTextSize(11);
+        timeText.setTextColor(0xFFA8C0D0);
+        header.addView(timeText);
+
+        item.addView(header, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 预览
+        TextView preview = new TextView(this);
+        preview.setText(session.preview());
+        preview.setTextSize(13);
+        preview.setTextColor(0xFF6B8A9E);
+        preview.setMaxLines(1);
+        preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        previewLp.topMargin = dpToPx(4);
+        item.addView(preview, previewLp);
+
+        // 消息数
+        TextView countText = new TextView(this);
+        countText.setText(session.count() + " 条消息");
+        countText.setTextSize(11);
+        countText.setTextColor(0xFFA8C0D0);
+        LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        countLp.topMargin = dpToPx(2);
+        item.addView(countText, countLp);
+
+        // 点击打开会话
+        item.setOnClickListener(v -> {
+            drawerLayout.closeDrawer(chatDrawerView);
+            Intent intent = new Intent(this, ChatActivity.class);
+            intent.putExtra(ChatActivity.EXTRA_SESSION_ID, session.id());
+            startActivity(intent);
+        });
+
+        return item;
+    }
+
+    private int dpToPx(int dp) {
+        return (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics());
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (imageHandler != null) {
+            imageHandler.release();
         }
     }
 }
