@@ -23,67 +23,63 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 /**
- * Phase 4: AI 服务调度器 — 串联 ContextBuilder 与 DeepSeek API。
+ * AI 服务 — 对接 DeepSeek API，接收评论文本，返回趣味评价。
  *
- * <p>职责：
+ * <p>两种调用入口：
  * <ul>
- *   <li>作为 {@link ContextBuilder.Listener} 接收上下文更新</li>
- *   <li>2s 防抖 + 8s 冷却，避免频繁调用 API</li>
- *   <li>内容哈希检测：如果评论没变化就不重复调用</li>
- *   <li>记忆最近 5 条 AI 回复，避免重复生成</li>
- *   <li>通过 OkHttp 异步调用 DeepSeek API（兼容 OpenAI 格式）</li>
- *   <li>指数退避重试（最多 3 次）</li>
- *   <li>解析响应并通过 {@link Listener} 分发</li>
+ *   <li>{@link #sendComment(String)} — 自动模式（定时器触发）</li>
+ *   <li>{@link #evaluateComment(Comment)} — 单击评价</li>
  * </ul>
+ *
+ * <p>内容哈希检测：相同评论不重复调用。
+ * 指数退避重试（最多 3 次）。
  */
-public class AiService implements ContextBuilder.Listener {
+public class AiService {
 
     private static final String TAG = "ZuoYouAI";
 
-    // 防抖 & 冷却（毫秒）
-    private static final long DEBOUNCE_MS = 2000;
-    private static final long COOLDOWN_MS = 8000;
     private static final long API_TIMEOUT_MS = 15000;
-
-    // 重试参数
     private static final int MAX_RETRIES = 3;
     private static final long[] RETRY_DELAYS_MS = {1000, 2000, 4000};
-
     private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
+
+    /** 固定 system prompt — 抖音搭子风格 */
+    private static final String SYSTEM_PROMPT = """
+            你现在是我的专属抖音搭子，全程陪我刷抖音、一起看视频评论，做有趣走心吐槽，不生硬说教。
+            规则：
+            我会给你抖音视频内容简介和一条评论，你针对这条评论输出好玩的评价；
+            风格接地气、网感足，可玩梗、阴阳怪气、搞笑共情、暖心调侃，像好朋友唠嗑；
+            长短自由，不用长篇大论，也不要太简短，偶尔可以带点抖音热门网络梗；
+            拒绝严肃讲道理、不批判网友，主打一起吃瓜看热闹；
+            如果评论很搞笑就跟着笑，emo 评论温柔共情，奇葩评论犀利玩梗吐槽；
+            直接产出趣味搭子评价，不要加引号或标注，不要输出 JSON。""";
 
     private final Context context;
     private final Handler mainHandler;
     private final OkHttpClient httpClient;
-    private final AiPersonality personality;
     private final SecurePrefs securePrefs;
 
-    // 配置缓存
+    // 配置
     private String apiKey = "";
     private String apiBaseUrl = Constants.DEFAULT_API_BASE_URL;
     private String modelName = Constants.DEFAULT_MODEL_NAME;
 
     // 状态
-    private AppContext latestContext;
-    private long lastApiCallTime = 0;
-    private boolean pendingDebounce = false;
     private volatile boolean shutdown = false;
-
-    /** 上次发送给 API 的 userMessage 哈希，相同则不重复调用 */
     private int lastContentHash = 0;
+    private volatile Call currentCall = null;
+
+    /** 静态引用，供外部调用 */
+    private static volatile AiService sInstance = null;
 
     /** 最近 5 条 AI 回复，传给 API 避免重复 */
     private final LinkedList<String> recentResponses = new LinkedList<>();
-
-    // 内部 runnable（在构造函数中初始化以避免自引用）
-    private final Runnable debounceRunnable;
 
     // 外部监听器
     private volatile Listener listener;
 
     public interface Listener {
-        /** AI 生成了一句吐槽 */
-        void onAiResponse(String text, String emotion);
-        /** AI 服务出错 */
+        void onAiResponse(String text);
         void onError(String message);
     }
 
@@ -95,9 +91,8 @@ public class AiService implements ContextBuilder.Listener {
                 .readTimeout(API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .writeTimeout(API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .build();
-        this.personality = new AiPersonality();
         this.securePrefs = new SecurePrefs(this.context);
-        this.debounceRunnable = createDebounceRunnable();
+        sInstance = this;
         loadConfig();
     }
 
@@ -105,149 +100,113 @@ public class AiService implements ContextBuilder.Listener {
         this.listener = listener;
     }
 
-    public AiPersonality getPersonality() {
-        return personality;
-    }
-
-    // ───── 配置加载 ─────
+    // ───── 配置 ─────
 
     public void loadConfig() {
         SharedPreferences prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE);
         apiKey = securePrefs.getApiKey();
         apiBaseUrl = prefs.getString(Constants.KEY_API_BASE_URL, Constants.DEFAULT_API_BASE_URL);
         modelName = prefs.getString(Constants.KEY_MODEL_NAME, Constants.DEFAULT_MODEL_NAME);
-        String personalityStr = prefs.getString(Constants.KEY_PERSONALITY, Constants.DEFAULT_PERSONALITY);
-        personality.setMode(personalityStr);
-        Log.d(TAG, "配置已加载: model=" + modelName + ", personality=" + personality.getMode()
-                + ", key=" + (apiKey.isEmpty() ? "未设置" : "已设置"));
+        Log.d(TAG, "配置已加载: model=" + modelName + ", key=" + (apiKey.isEmpty() ? "未设置" : "已设置"));
     }
 
     public boolean isConfigured() {
         return !apiKey.isEmpty();
     }
 
+    // ───── 自动模式 ─────
+
     /**
-     * 重置内容哈希与冷却——在发生窗口切换（翻视频）时调用。
-     * 确保新视频的评论不会被旧缓存跳过。
+     * 自动模式：定时器选出最佳评论后调用。
+     * 内容哈希检查 → 直接调 API。
+     */
+    public synchronized void sendComment(String text) {
+        if (shutdown || text == null || text.isEmpty()) return;
+
+        // 内容哈希：相同评论跳过
+        int hash = text.hashCode();
+        if (hash == lastContentHash) return;
+        lastContentHash = hash;
+
+        // 取消正在进行的旧请求
+        cancelCurrentCall();
+
+        callApi(SYSTEM_PROMPT, text);
+    }
+
+    /**
+     * 重置内容哈希（视频切换时调用）。
      */
     public synchronized void resetVideoContext() {
         lastContentHash = 0;
-        lastApiCallTime = 0;
-        Log.d(TAG, "视频切换，重置内容哈希/冷却");
+        Log.d(TAG, "视频切换，重置内容哈希");
     }
 
-    // ───── ContextBuilder.Listener ─────
+    // ───── 用户手动评价 ─────
 
-    @Override
-    public synchronized void onContextUpdated(AppContext appContext) {
-        if (shutdown) return;
-
-        // 计算内容哈希，判断评论是否有实质性变化
-        int newHash = contentHash(appContext);
-        if (newHash == lastContentHash) {
-            // 评论没有变化，跳过本次触发
-            return;
+    /**
+     * 静态入口：单击评价（供悬浮窗使用）。
+     */
+    public static void evaluateCommentDirect(Comment comment) {
+        AiService instance = sInstance;
+        if (instance != null) {
+            instance.evaluateComment(comment);
         }
-        lastContentHash = newHash;
-
-        latestContext = appContext;
-
-        // 取消上一次的防抖
-        if (pendingDebounce) {
-            mainHandler.removeCallbacks(debounceRunnable);
-        }
-
-        // 重新计时 2s 防抖
-        pendingDebounce = true;
-        mainHandler.postDelayed(debounceRunnable, DEBOUNCE_MS);
     }
 
     /**
-     * 对 AppContext 中的评论内容计算摘要哈希。
-     * 只有评论数量或内容变化时才改变。
+     * 单击评价：用固定 system prompt + 评论文本。
      */
-    private static int contentHash(AppContext ctx) {
-        if (ctx == null) return 0;
-        int h = ctx.commentCount();
-        var comments = ctx.recentComments();
-        if (comments != null) {
-            // 用最近 5 条评论的 (user, text, likes) 来做哈希
-            int count = Math.min(comments.size(), 5);
-            for (int i = comments.size() - count; i < comments.size(); i++) {
-                Comment c = comments.get(i);
-                h = 31 * h + c.user().hashCode();
-                h = 31 * h + (c.text() != null ? c.text().hashCode() : 0);
-                h = 31 * h + c.likeCount();
-            }
-        }
-        return h;
-    }
-
-    private Runnable createDebounceRunnable() {
-        final Runnable[] selfRef = new Runnable[1];
-        selfRef[0] = () -> {
-            synchronized (AiService.this) {
-                pendingDebounce = false;
-                if (shutdown) return;
-
-                long now = System.currentTimeMillis();
-                long elapsed = now - lastApiCallTime;
-
-                if (elapsed < COOLDOWN_MS) {
-                    long wait = COOLDOWN_MS - elapsed;
-                    Log.d(TAG, "冷却中，等待 " + wait + "ms 后重试");
-                    pendingDebounce = true;
-                    mainHandler.postDelayed(selfRef[0], wait);
-                    return;
-                }
-            }
-
-            callApi();
-        };
-        return selfRef[0];
-    }
-
-    // ───── API 调用 ─────
-
-    private void callApi() {
-        callApiWithRetry(0);
-    }
-
-    /**
-     * 带指数退避重试的 API 调用。
-     *
-     * @param attempt 当前重试次数（0 = 首次调用）
-     */
-    private void callApiWithRetry(int attempt) {
-        if (shutdown) return;
-
+    public synchronized void evaluateComment(Comment comment) {
+        if (shutdown || comment == null) return;
         loadConfig();
-
-        AppContext ctx;
-        synchronized (this) {
-            ctx = latestContext;
-            if (ctx == null) return;
-        }
-
         if (apiKey.isEmpty()) {
-            Log.w(TAG, "API Key 未配置，跳过 AI 调用");
             dispatchError("请先在设置中配置 API Key");
             return;
         }
 
-        String systemPrompt = personality.buildSystemPrompt();
+        // 取消正在进行的自动请求
+        cancelCurrentCall();
 
-        // 附加上次回复作为「已说过的话」，避免重复
-        String userMessage = personality.buildUserMessage(ctx);
+        String commentText = comment.text() != null ? comment.text() : "(无文本)";
+        callApi(SYSTEM_PROMPT, commentText);
+    }
+
+    // ───── API 调用 ─────
+
+    private void cancelCurrentCall() {
+        if (currentCall != null) {
+            currentCall.cancel();
+            currentCall = null;
+        }
+    }
+
+    private void callApi(String systemPrompt, String userMessage) {
+        callApiWithRetry(systemPrompt, userMessage, 0);
+    }
+
+    private void callApiWithRetry(String systemPrompt, String userMessage, int attempt) {
+        if (shutdown) return;
+
+        if (apiKey.isEmpty()) {
+            dispatchError("请先在设置中配置 API Key");
+            return;
+        }
+
+        // 附加上次回复避免重复
         synchronized (recentResponses) {
             if (!recentResponses.isEmpty()) {
-                StringBuilder historySb = new StringBuilder("\n\n你之前已经说过的吐槽（不要重复这些）：\n");
+                StringBuilder historySb = new StringBuilder("\n\n你之前已经说过的（不要重复）：\n");
                 for (String r : recentResponses) {
                     historySb.append("• ").append(r).append("\n");
                 }
                 userMessage += historySb.toString();
             }
         }
+
+        // 创建 final 副本供内部类引用
+        final String finalSystemPrompt = systemPrompt;
+        final String finalUserMessage = userMessage;
 
         String requestBody;
         try {
@@ -258,12 +217,8 @@ public class AiService implements ContextBuilder.Listener {
             return;
         }
 
-        Log.d(TAG, "--- 发起 AI 调用" + (attempt > 0 ? " (重试 #" + attempt + ")" : "") + " ---");
+        Log.d(TAG, "--- AI 调用" + (attempt > 0 ? " (重试 #" + attempt + ")" : "") + " ---");
         Log.d(TAG, "userMessage=" + userMessage.substring(0, Math.min(userMessage.length(), 200)) + "…");
-
-        synchronized (this) {
-            lastApiCallTime = System.currentTimeMillis();
-        }
 
         Request request = new Request.Builder()
                 .url(apiBaseUrl + "/chat/completions")
@@ -272,13 +227,16 @@ public class AiService implements ContextBuilder.Listener {
                 .post(RequestBody.create(requestBody, JSON_MEDIA))
                 .build();
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        Call call = httpClient.newCall(request);
+        currentCall = call;
+
+        call.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                if (shutdown) return;
+                if (shutdown || call.isCanceled()) return;
                 Log.e(TAG, "API 请求失败 (attempt " + (attempt + 1) + "): " + e.getMessage());
                 if (attempt < MAX_RETRIES - 1) {
-                    scheduleRetry(attempt);
+                    scheduleRetry(finalSystemPrompt, finalUserMessage, attempt);
                 } else {
                     dispatchError("网络请求失败（已重试 " + MAX_RETRIES + " 次）: " + e.getMessage());
                 }
@@ -286,16 +244,24 @@ public class AiService implements ContextBuilder.Listener {
 
             @Override
             public void onResponse(Call call, Response response) {
-                if (shutdown) return;
+                if (shutdown || call.isCanceled()) {
+                    response.close();
+                    return;
+                }
                 try {
+                    // 请求被取消（新请求触发了 cancelCurrentCall），直接忽略
+                    if (call.isCanceled()) {
+                        response.close();
+                        return;
+                    }
+
                     int code = response.code();
                     String body = response.body() != null ? response.body().string() : "";
 
-                    // 可重试的状态码：429(限流) / 500 / 502 / 503 / 504
                     if (isRetryableStatus(code) && attempt < MAX_RETRIES - 1) {
                         Log.w(TAG, "API 返回可重试状态码 " + code + " (attempt " + (attempt + 1) + ")");
                         response.close();
-                        scheduleRetry(attempt);
+                        scheduleRetry(finalSystemPrompt, finalUserMessage, attempt);
                         return;
                     }
 
@@ -305,62 +271,60 @@ public class AiService implements ContextBuilder.Listener {
                         return;
                     }
 
+                    // 直接取 content 字符串（不再解析 JSON）
+                    Log.d(TAG, "API 响应 (前200字): " + body.substring(0, Math.min(body.length(), 200)));
                     JSONObject json = new JSONObject(body);
                     JSONArray choices = json.optJSONArray("choices");
                     if (choices != null && choices.length() > 0) {
                         JSONObject message = choices.getJSONObject(0).optJSONObject("message");
                         if (message != null) {
-                            String content = message.optString("content", "");
-                            AiPersonality.ParsedResponse parsed = personality.parseResponse(content);
-
-                            // 记录回复到历史，避免下次重复
-                            synchronized (recentResponses) {
-                                recentResponses.addLast(parsed.text());
-                                if (recentResponses.size() > 5) {
-                                    recentResponses.removeFirst();
+                            String content = message.optString("content", "").trim();
+                            if (!content.isEmpty()) {
+                                synchronized (recentResponses) {
+                                    recentResponses.addLast(content);
+                                    if (recentResponses.size() > 5) {
+                                        recentResponses.removeFirst();
+                                    }
                                 }
+                                Log.d(TAG, "AI 回复: " + content);
+                                dispatchResponse(content);
+                                return;
                             }
-
-                            Log.d(TAG, "AI 吐槽 [" + parsed.emotion() + "]: " + parsed.text());
-                            dispatchResponse(parsed.text(), parsed.emotion());
-                            return;
                         }
                     }
                     Log.e(TAG, "API 响应缺少 choices: " + body);
                     dispatchError("响应解析失败");
                 } catch (Exception e) {
-                    Log.e(TAG, "处理 API 响应时异常", e);
-                    dispatchError("响应处理异常");
+                    // 被取消的请求产生的异常，静默忽略
+                    if (call.isCanceled()) {
+                        Log.d(TAG, "已取消的请求，忽略异常: " + e.getClass().getSimpleName());
+                        return;
+                    }
+                    Log.e(TAG, "处理 API 响应时异常: " + e.getClass().getSimpleName() + " - " + e.getMessage(), e);
+                    dispatchError("响应处理异常: " + e.getMessage());
                 }
             }
         });
     }
 
-    /**
-     * 判断 HTTP 状态码是否可重试。
-     */
     private static boolean isRetryableStatus(int code) {
         return code == 429 || code == 500 || code == 502 || code == 503 || code == 504;
     }
 
-    /**
-     * 调度一次延迟重试。
-     */
-    private void scheduleRetry(int currentAttempt) {
+    private void scheduleRetry(String systemPrompt, String userMessage, int currentAttempt) {
         int nextAttempt = currentAttempt + 1;
         long delay = RETRY_DELAYS_MS[Math.min(currentAttempt, RETRY_DELAYS_MS.length - 1)];
         Log.d(TAG, "将在 " + delay + "ms 后重试 (attempt " + (nextAttempt + 1) + "/" + MAX_RETRIES + ")");
-        mainHandler.postDelayed(() -> callApiWithRetry(nextAttempt), delay);
+        mainHandler.postDelayed(() -> callApiWithRetry(systemPrompt, userMessage, nextAttempt), delay);
     }
 
     private String buildJsonRequest(String systemPrompt, String userMessage) throws JSONException {
         JSONObject body = new JSONObject();
         body.put("model", modelName);
-        body.put("temperature", personality.getTemperature());
+        body.put("temperature", 0.85);
         body.put("max_tokens", 200);
 
         JSONArray messages = new JSONArray();
-
         JSONObject sysMsg = new JSONObject();
         sysMsg.put("role", "system");
         sysMsg.put("content", systemPrompt);
@@ -377,10 +341,10 @@ public class AiService implements ContextBuilder.Listener {
 
     // ───── 响应分发 ─────
 
-    private void dispatchResponse(String text, String emotion) {
+    private void dispatchResponse(String text) {
         if (shutdown) return;
         if (listener != null) {
-            listener.onAiResponse(text, emotion);
+            listener.onAiResponse(text);
         }
     }
 
@@ -398,6 +362,7 @@ public class AiService implements ContextBuilder.Listener {
             shutdown = true;
             mainHandler.removeCallbacksAndMessages(null);
         }
+        sInstance = null;
         httpClient.dispatcher().cancelAll();
         Log.d(TAG, "AiService 已关闭");
     }

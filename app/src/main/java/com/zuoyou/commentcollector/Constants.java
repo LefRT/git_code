@@ -17,16 +17,12 @@ public final class Constants {
     public static final String KEY_API_KEY = "api_key";
     public static final String KEY_API_BASE_URL = "api_base_url";
     public static final String KEY_MODEL_NAME = "model_name";
-    public static final String KEY_PERSONALITY = "personality";
 
     /** 默认 API 地址 */
     public static final String DEFAULT_API_BASE_URL = "https://api.deepseek.com/v1";
 
     /** 默认模型名 */
     public static final String DEFAULT_MODEL_NAME = "deepseek-chat";
-
-    /** 默认人格 */
-    public static final String DEFAULT_PERSONALITY = "ROAST";
 
     /** 截帧捕获的目标宽度（像素） */
     public static final int CAPTURE_WIDTH_PX = 480;

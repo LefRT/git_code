@@ -17,28 +17,10 @@
     <string name="api_base_url_hint">https://api.deepseek.com/v1</string>
     <string name="model_name_label">模型名称</string>
     <string name="model_name_hint">deepseek-chat</string>
-    <string name="personality_label">人格风格</string>
-    <string name="personality_roast">吐槽搭子</string>
-    <string name="personality_gentle">温柔陪伴</string>
-    <string name="personality_funny">搞笑段子手</string>
     <string name="save">保存</string>
     <string name="settings_saved">设置已保存</string>
     <string name="api_key_missing">请先配置 API Key</string>
     <string name="overlay_permission_denied">悬浮窗权限被拒绝，请在系统设置中允许</string>
     <string name="ai_status_idle">AI: 等待配置</string>
     <string name="ai_status_thinking">AI: 思考中…</string>
-
-    <!-- 人格选项（显示名） -->
-    <string-array name="personality_options">
-        <item>吐槽搭子</item>
-        <item>温柔陪伴</item>
-        <item>搞笑段子手</item>
-    </string-array>
-
-    <!-- 人格选项（内部值） -->
-    <string-array name="personality_values">
-        <item>ROAST</item>
-        <item>GENTLE</item>
-        <item>FUNNY</item>
-    </string-array>
 </resources>

@@ -54,9 +54,6 @@ public class ScreenCaptureService extends Service {
     private static final String CHANNEL_ID = "screen_capture_channel";
     private static final int NOTIFICATION_ID = 2;
 
-    /** 截帧间隔（毫秒） */
-    private static final long CAPTURE_INTERVAL_MS = 3000;
-
     /** JPEG 压缩质量 (0-100) */
     private static final int JPEG_QUALITY = 80;
 
@@ -80,6 +77,9 @@ public class ScreenCaptureService extends Service {
 
     /** 抖音是否在前台（由 DouyinCommentService 通过无障碍事件设置） */
     private static volatile boolean sDouyinForeground = false;
+
+    /** 静态引用，供 captureOnce() 使用 */
+    private static volatile ScreenCaptureService sInstance = null;
 
     // ── 实例字段 ──
 
@@ -129,6 +129,7 @@ public class ScreenCaptureService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         startForegroundNotification();
     }
 
@@ -172,6 +173,7 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public void onDestroy() {
+        sInstance = null;
         stopCapture();
         super.onDestroy();
     }
@@ -218,7 +220,7 @@ public class ScreenCaptureService extends Service {
                 captureWidth, captureHeight, PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(reader -> {
             // ImageReader 有新帧可用时的回调（由系统调用）
-            // 实际截帧由 scheduleNextCapture → captureFrame 驱动
+            // 实际截帧由外部定时器调用 captureOnce() 驱动
         }, backgroundHandler);
 
         // 创建虚拟显示
@@ -233,10 +235,7 @@ public class ScreenCaptureService extends Service {
 
         isRunning = true;
         Log.d(TAG, "屏幕捕获已启动: " + captureWidth + "x" + captureHeight
-                + " @ " + screenDpi + "dpi (每 " + (CAPTURE_INTERVAL_MS / 1000) + "s 一帧)");
-
-        // 启动定时截帧
-        scheduleNextCapture();
+                + " @ " + screenDpi + "dpi (由外部定时器驱动)");
     }
 
     private void stopCapture() {
@@ -265,9 +264,15 @@ public class ScreenCaptureService extends Service {
 
     // ── 截帧 ──
 
-    private void scheduleNextCapture() {
-        if (!isRunning) return;
-        backgroundHandler.postDelayed(this::captureFrame, CAPTURE_INTERVAL_MS);
+    /**
+     * 由外部定时器（DouyinCommentService）调用，执行一次截帧。
+     * 不再自行调度下一次截帧。
+     */
+    public static void captureOnce() {
+        ScreenCaptureService instance = sInstance;
+        if (instance == null || !isRunning || !sDouyinForeground) return;
+        if (instance.backgroundHandler == null) return;
+        instance.backgroundHandler.post(instance::captureFrame);
     }
 
     private void captureFrame() {
@@ -275,13 +280,11 @@ public class ScreenCaptureService extends Service {
 
         // 仅在抖音前台时捕获
         if (!sDouyinForeground) {
-            scheduleNextCapture();
             return;
         }
 
         // acquireLatestImage() 只保留最新帧，避免队列堆积
         if (imageReader == null) {
-            scheduleNextCapture();
             return;
         }
         Image image = imageReader.acquireLatestImage();
@@ -298,8 +301,6 @@ public class ScreenCaptureService extends Service {
                 image.close();
             }
         }
-
-        scheduleNextCapture();
     }
 
     // ── 图像处理 ──

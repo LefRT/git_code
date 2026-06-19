@@ -23,9 +23,12 @@ import java.util.Locale;
 public class ContextBuilder {
 
     private static final String TAG = "ZuoYouContext";
-    private static final int MAX_COMMENTS = 20;
+    private static final int MAX_COMMENTS = 5;
     private static final int MAX_SCREENSHOTS = 5;
     private static final int MAX_TIMELINE = 30;
+
+    /** 静态引用，供 FloatingWindowService 读取最新评论 */
+    private static volatile ContextBuilder sInstance = null;
 
     private final LinkedList<Comment> recentComments = new LinkedList<>();
     private final LinkedList<String> recentScreenshots = new LinkedList<>();
@@ -33,6 +36,10 @@ public class ContextBuilder {
 
     private int totalCommentCount = 0;
     private volatile Listener listener;
+
+    public ContextBuilder() {
+        sInstance = this;
+    }
 
     // 缓存时间格式化器（非线程安全，但在单线程推送中没问题）
     private final SimpleDateFormat timestampFormat =
@@ -94,6 +101,51 @@ public class ContextBuilder {
 
         Log.d(TAG, "推送截图: " + filePath);
         notifyUpdate();
+    }
+
+    /**
+     * 静默推送评论（不触发 listener.onContextUpdated）。
+     * 仅更新缓冲区，供悬浮窗列表显示。
+     */
+    public void pushCommentsSilent(List<Comment> comments) {
+        if (comments == null || comments.isEmpty()) return;
+
+        String now;
+        synchronized (timestampFormat) {
+            now = timestampFormat.format(new Date());
+        }
+        synchronized (recentComments) {
+            for (Comment c : comments) {
+                recentComments.addLast(c);
+                if (recentComments.size() > MAX_COMMENTS) {
+                    recentComments.removeFirst();
+                }
+                String detail = c.user() + ": " + (c.text() != null ? c.text() : "(无文本)");
+                pushTimelineEvent(new TimelineEvent("comment", now, detail));
+            }
+            totalCommentCount += comments.size();
+        }
+
+        Log.d(TAG, "静默推送 " + comments.size() + " 条评论，累计 " + totalCommentCount);
+        // 不调用 notifyUpdate()，由调用方直接触发 AI
+    }
+
+    /**
+     * 获取最新的评论列表（供悬浮窗显示评论者昵称）。
+     */
+    public List<Comment> getLatestNewComments() {
+        synchronized (recentComments) {
+            return List.copyOf(recentComments);
+        }
+    }
+
+    /**
+     * 静态入口：获取最新评论列表（供 FloatingWindowService 使用）。
+     */
+    public static List<Comment> getLatestCommentsStatic() {
+        ContextBuilder instance = sInstance;
+        if (instance == null) return List.of();
+        return instance.getLatestNewComments();
     }
 
     // ──────────────────────────────────────────────
