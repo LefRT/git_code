@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 基础主题：NoActionBar，自己控制 Toolbar -->
+    <!-- 基础主题：冰蓝色调 -->
     <style name="Theme.ZuoYou" parent="Theme.MaterialComponents.Light.NoActionBar">
-        <item name="colorPrimary">#FF6B35</item>
-        <item name="colorPrimaryVariant">#E55A2B</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorSecondary">#FF8A50</item>
-        <item name="colorSecondaryVariant">#FF5722</item>
-        <item name="colorOnSecondary">#FFFFFF</item>
-        <item name="android:statusBarColor">#FF6B35</item>
-        <item name="android:navigationBarColor">#FFF8F2</item>
-        <item name="android:windowBackground">@color/bg_cream</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorPrimary">@color/blue_primary</item>
+        <item name="colorPrimaryVariant">@color/blue_dark</item>
+        <item name="colorOnPrimary">@color/text_on_primary</item>
+        <item name="colorSecondary">@color/blue_light</item>
+        <item name="colorSecondaryVariant">@color/blue_dark</item>
+        <item name="colorOnSecondary">@color/text_primary</item>
+        <item name="android:statusBarColor">@color/blue_primary</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/bg_page</item>
+        <item name="android:windowBackground">@color/bg_page</item>
     </style>
 
     <!-- 设置页面继承同样的主题 -->

@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">左右</string>
-    <string name="accessibility_service_description">「左右」AI 陪看助手：读取抖音评论区内容（用户、评论、点赞数），用于 AI 实时分析和陪看。仅在抖音 App 内运行，不收集其他应用数据。</string>
-    <string name="start_service">开启服务</string>
-    <string name="stop_service">停止服务</string>
-    <string name="status_idle">等待中...</string>
-    <string name="status_running">正在监听抖音</string>
+    <string name="app_name">可不</string>
+    <string name="accessibility_service_description">「可不」AI 陪看助手：读取抖音评论区内容（用户、评论、点赞数），用于 AI 实时分析和陪看。仅在抖音 App 内运行，不收集其他应用数据。</string>
 
-    <!-- Phase 4: 悬浮窗 -->
-    <string name="floating_window_enable">开启悬浮窗</string>
-    <string name="floating_window_disable">关闭悬浮窗</string>
-    <string name="settings_title">API 设置</string>
+    <!-- 侧边栏 -->
+    <string name="drawer_open">开启</string>
+    <string name="drawer_open_desc">启动悬浮窗 + 屏幕捕获</string>
+    <string name="drawer_settings">设置</string>
+    <string name="drawer_settings_desc">无障碍服务 &amp; API 配置</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_accessibility_title">无障碍服务</string>
+    <string name="settings_accessibility_status_on">已开启</string>
+    <string name="settings_accessibility_status_off">未开启</string>
+    <string name="settings_accessibility_goto">去开启</string>
+    <string name="settings_accessibility_close">关闭</string>
+    <string name="settings_api_title">API 配置</string>
     <string name="api_key_label">API Key</string>
     <string name="api_key_hint">输入 DeepSeek API Key</string>
     <string name="api_base_url_label">API 地址</string>
@@ -21,6 +27,10 @@
     <string name="settings_saved">设置已保存</string>
     <string name="api_key_missing">请先配置 API Key</string>
     <string name="overlay_permission_denied">悬浮窗权限被拒绝，请在系统设置中允许</string>
-    <string name="ai_status_idle">AI: 等待配置</string>
-    <string name="ai_status_thinking">AI: 思考中…</string>
+
+    <!-- 通用 -->
+    <string name="floating_window_enable">开启悬浮窗</string>
+    <string name="floating_window_disable">关闭悬浮窗</string>
+    <string name="start_service">开启服务</string>
+    <string name="stop_service">停止服务</string>
 </resources>

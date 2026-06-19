@@ -1,34 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/bg_main_gradient">
 
-    <!-- ═══ 头部区域 ═══ -->
+    <!-- ═══ 简洁头部 ═══ -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:background="@drawable/bg_settings_header"
         android:paddingTop="40dp"
-        android:paddingBottom="24dp"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
+        android:paddingBottom="20dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
         android:gravity="center_vertical">
 
-        <!-- 返回按钮 -->
         <TextView
             android:id="@+id/backButton"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:text="←"
             android:textSize="22sp"
-            android:textColor="#B3FFFFFF"
+            android:textColor="@color/text_primary"
             android:gravity="center"
             android:clickable="true"
-            android:focusable="true" />
+            android:focusable="true"
+            android:background="?attr/selectableItemBackgroundBorderless" />
 
         <TextView
             android:layout_width="0dp"
@@ -37,9 +35,8 @@
             android:text="@string/settings_title"
             android:textSize="22sp"
             android:textStyle="bold"
-            android:textColor="@color/text_on_primary"
+            android:textColor="@color/text_primary"
             android:layout_marginStart="12dp" />
-
     </LinearLayout>
 
     <!-- ═══ 内容区域 ═══ -->
@@ -50,7 +47,6 @@
         android:clipToPadding="false"
         android:paddingStart="20dp"
         android:paddingEnd="20dp"
-        android:paddingTop="20dp"
         android:paddingBottom="20dp"
         android:descendantFocusability="blocksDescendants">
 
@@ -59,7 +55,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- ═══ API 配置卡片 ═══ -->
+            <!-- ═══ 无障碍服务卡片 ═══ -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -71,18 +67,95 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="API 连接"
+                    android:text="@string/settings_accessibility_title"
                     android:textSize="13sp"
                     android:textColor="@color/text_hint"
                     android:letterSpacing="0.05"
-                    android:textAllCaps="true"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- 状态行 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <View
+                        android:id="@+id/settingsStatusDot"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/bg_status_inactive" />
+
+                    <TextView
+                        android:id="@+id/settingsStatusText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_accessibility_status_off"
+                        android:textSize="15sp"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginStart="10dp" />
+
+                    <!-- 开启按钮 -->
+                    <TextView
+                        android:id="@+id/settingsAccessButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_button_secondary"
+                        android:text="@string/settings_accessibility_goto"
+                        android:textSize="13sp"
+                        android:textColor="@color/blue_primary"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp"
+                        android:clickable="true"
+                        android:focusable="true" />
+
+                    <!-- 关闭按钮 -->
+                    <TextView
+                        android:id="@+id/settingsAccessCloseButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_button_close"
+                        android:text="@string/settings_accessibility_close"
+                        android:textSize="13sp"
+                        android:textColor="@color/text_on_primary"
+                        android:textStyle="bold"
+                        android:gravity="center"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp"
+                        android:layout_marginStart="8dp"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ═══ API 配置卡片 ═══ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_card"
+                android:padding="20dp"
+                android:layout_marginTop="14dp"
+                android:elevation="2dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_api_title"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_hint"
+                    android:letterSpacing="0.05"
                     android:layout_marginBottom="16dp" />
 
                 <!-- API Key -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="API Key"
+                    android:text="@string/api_key_label"
                     android:textSize="13sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginBottom="6dp" />
@@ -105,7 +178,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="API 地址"
+                    android:text="@string/api_base_url_label"
                     android:textSize="13sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="14dp"
@@ -129,7 +202,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="模型名称"
+                    android:text="@string/model_name_label"
                     android:textSize="13sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="14dp"
@@ -149,34 +222,22 @@
                     android:paddingEnd="16dp"
                     android:singleLine="true" />
 
+                <!-- 保存按钮 -->
+                <TextView
+                    android:id="@+id/saveButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:background="@drawable/bg_save_button"
+                    android:text="@string/save"
+                    android:textSize="15sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginTop="20dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
             </LinearLayout>
-
-            <!-- ═══ 保存按钮 ═══ -->
-            <TextView
-                android:id="@+id/saveButton"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:background="@drawable/bg_save_button"
-                android:text="@string/save"
-                android:textSize="16sp"
-                android:textColor="@color/text_on_primary"
-                android:textStyle="bold"
-                android:gravity="center"
-                android:layout_marginTop="20dp"
-                android:clickable="true"
-                android:focusable="true" />
-
-            <!-- 提示 -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="💡 需要在 DeepSeek 官网 (platform.deepseek.com) 注册并创建 API Key"
-                android:textSize="12sp"
-                android:textColor="@color/text_hint"
-                android:lineSpacingMultiplier="1.5"
-                android:layout_marginTop="16dp"
-                android:layout_marginBottom="16dp"
-                android:gravity="center" />
 
         </LinearLayout>
     </ScrollView>

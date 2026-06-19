@@ -470,7 +470,7 @@ public class ScreenCaptureService extends Service {
         }
 
         Notification notification = new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("左右 - 屏幕捕获中")
+                .setContentTitle("可不 - 屏幕捕获中")
                 .setContentText("正在为 AI 视觉分析截取屏幕画面")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)

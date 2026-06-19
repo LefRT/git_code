@@ -557,7 +557,7 @@ public class FloatingWindowService extends Service {
 
     private Notification buildNotification(String text) {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("左右")
+                .setContentTitle("可不")
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
                 .setOngoing(true)

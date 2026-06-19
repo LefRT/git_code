@@ -8,27 +8,26 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.View;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.drawerlayout.widget.DrawerLayout;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "ZuoYouMain";
 
-    private TextView statusText;
-    private TextView aiStatusText;
-    private View statusDot;
-    private View aiDot;
-    private TextView accessibilityButton;
-    private TextView screenCaptureButton;
-    private TextView floatingWindowButton;
-    private TextView settingsButton;
-    private boolean isServiceRunning = false;
+    private DrawerLayout drawerLayout;
+    private LinearLayout drawerView;
+
+    // 侧边栏合并服务开关
+    private TextView drawerServiceStatus;
+    private TextView drawerServiceToggle;
 
     /**
      * Android 13+ 通知权限请求（前台服务必需）。
@@ -52,10 +51,11 @@ public class MainActivity extends AppCompatActivity {
                             serviceIntent.putExtra("resultCode", result.getResultCode());
                             serviceIntent.putExtra("data", result.getData());
                             startForegroundService(serviceIntent);
-                            screenCaptureButton.setText("停止屏幕捕获");
+                            Log.d(TAG, "屏幕捕获已启动");
                         } else {
-                            Toast.makeText(this, "屏幕捕获权限被拒绝", Toast.LENGTH_SHORT).show();
+                            Log.d(TAG, "屏幕捕获授权被拒绝");
                         }
+                        updateDrawerStatus();
                     });
 
     /**
@@ -67,9 +67,12 @@ public class MainActivity extends AppCompatActivity {
                     result -> {
                         if (Settings.canDrawOverlays(this)) {
                             startFloatingWindowService();
+                            // 悬浮窗启动后，继续请求屏幕捕获
+                            requestScreenCapture();
                         } else {
                             Toast.makeText(this, R.string.overlay_permission_denied, Toast.LENGTH_SHORT).show();
                         }
+                        updateDrawerStatus();
                     });
 
     @Override
@@ -77,69 +80,58 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        statusText = findViewById(R.id.statusText);
-        aiStatusText = findViewById(R.id.aiStatusText);
-        statusDot = findViewById(R.id.statusDot);
-        aiDot = findViewById(R.id.aiDot);
-        accessibilityButton = findViewById(R.id.accessibilityButton);
-        screenCaptureButton = findViewById(R.id.screenCaptureButton);
-        floatingWindowButton = findViewById(R.id.floatingWindowButton);
-        settingsButton = findViewById(R.id.settingsButton);
+        drawerLayout = findViewById(R.id.drawerLayout);
+        drawerView = findViewById(R.id.drawerView);
+
+        // 侧边栏视图绑定
+        drawerServiceStatus = findViewById(R.id.drawerServiceStatus);
+        drawerServiceToggle = findViewById(R.id.drawerServiceToggle);
 
         // Android 13+ 需要 POST_NOTIFICATIONS 权限来显示前台通知
         requestNotificationPermission();
 
-        // ── 无障碍服务按钮 ──
-        accessibilityButton.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
+        // ── 菜单按钮：打开侧边栏 ──
+        ImageButton menuButton = findViewById(R.id.menuButton);
+        menuButton.setOnClickListener(v -> {
+            updateDrawerStatus();
+            drawerLayout.openDrawer(drawerView);
         });
 
-        // ── 屏幕捕获按钮 ──
-        screenCaptureButton.setOnClickListener(v -> {
-            if (ScreenCaptureService.isRunning) {
-                // 停止捕获
-                Intent intent = new Intent(this, ScreenCaptureService.class);
-                intent.setAction("STOP_CAPTURE");
-                startService(intent);
-                screenCaptureButton.setText("开启屏幕捕获");
-            } else {
-                // 请求授权
-                MediaProjectionManager manager =
-                        (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-                if (manager != null) {
-                    screenCaptureLauncher.launch(manager.createScreenCaptureIntent());
-                } else {
-                    Toast.makeText(this, "设备不支持屏幕捕获", Toast.LENGTH_SHORT).show();
+        // ── 合并服务开关：悬浮窗 + 屏幕捕获 ──
+        drawerServiceToggle.setOnClickListener(v -> {
+            if (FloatingWindowService.isRunning() || ScreenCaptureService.isRunning) {
+                // 关闭：依次停止屏幕捕获 → 悬浮窗
+                if (ScreenCaptureService.isRunning) {
+                    Intent intent = new Intent(this, ScreenCaptureService.class);
+                    intent.setAction("STOP_CAPTURE");
+                    startService(intent);
                 }
-            }
-        });
-
-        // ── 悬浮窗按钮 ──
-        floatingWindowButton.setOnClickListener(v -> {
-            if (FloatingWindowService.isRunning()) {
-                // 停止悬浮窗
-                Intent intent = new Intent(this, FloatingWindowService.class);
-                intent.setAction("STOP");
-                startService(intent);
-                floatingWindowButton.setText(R.string.floating_window_enable);
-                aiStatusText.setText(R.string.ai_status_idle);
+                if (FloatingWindowService.isRunning()) {
+                    Intent intent = new Intent(this, FloatingWindowService.class);
+                    intent.setAction("STOP");
+                    startService(intent);
+                }
+                Toast.makeText(this, "服务已关闭", Toast.LENGTH_SHORT).show();
             } else {
-                // Android 6+ 需要 SYSTEM_ALERT_WINDOW 权限
+                // 开启：先悬浮窗，再屏幕捕获
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                         && !Settings.canDrawOverlays(this)) {
                     Intent intent = new Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             Uri.parse("package:" + getPackageName()));
                     overlayPermissionLauncher.launch(intent);
-                } else {
-                    startFloatingWindowService();
+                    return;
                 }
+                startFloatingWindowService();
+                requestScreenCapture();
             }
+            updateDrawerStatus();
         });
 
         // ── 设置按钮 ──
-        settingsButton.setOnClickListener(v -> {
+        LinearLayout drawerSettingsButton = findViewById(R.id.drawerSettingsButton);
+        drawerSettingsButton.setOnClickListener(v -> {
+            drawerLayout.closeDrawer(drawerView);
             Intent intent = new Intent(this, SettingsActivity.class);
             startActivity(intent);
         });
@@ -148,7 +140,35 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateStatus();
+        updateDrawerStatus();
+    }
+
+    /**
+     * 更新侧边栏合并服务的状态显示。
+     */
+    private void updateDrawerStatus() {
+        boolean running = FloatingWindowService.isRunning() || ScreenCaptureService.isRunning;
+        drawerServiceStatus.setText(running ? "运行中" : "未开启");
+        drawerServiceToggle.setText(running ? "关闭" : "开启");
+        drawerServiceToggle.setBackgroundResource(running
+                ? R.drawable.bg_button_close
+                : R.drawable.bg_button_primary);
+    }
+
+    /**
+     * 请求屏幕捕获权限。
+     */
+    private void requestScreenCapture() {
+        if (ScreenCaptureService.isRunning) {
+            return;
+        }
+        MediaProjectionManager manager =
+                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        if (manager != null) {
+            screenCaptureLauncher.launch(manager.createScreenCaptureIntent());
+        } else {
+            Toast.makeText(this, "设备不支持屏幕捕获", Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**
@@ -161,74 +181,22 @@ public class MainActivity extends AppCompatActivity {
         } else {
             startService(intent);
         }
-        floatingWindowButton.setText(R.string.floating_window_disable);
-        aiStatusText.setText(R.string.ai_status_thinking);
-        Toast.makeText(this, "悬浮窗已开启", Toast.LENGTH_SHORT).show();
+        Log.d(TAG, "悬浮窗已启动");
     }
 
     /**
-     * 更新 UI 状态：检查无障碍服务是否运行、屏幕捕获是否运行。
+     * 检查无障碍服务是否已启用（供设置页使用）。
      */
-    private void updateStatus() {
-        // 无障碍服务
-        if (isAccessibilityServiceEnabled()) {
-            accessibilityButton.setText("✓ 无障碍服务已开启");
-            isServiceRunning = true;
-        } else {
-            accessibilityButton.setText("开启无障碍服务");
-            isServiceRunning = false;
-        }
-
-        // 屏幕捕获 + 悬浮窗
-        boolean screenOn = ScreenCaptureService.isRunning;
-        boolean floatOn = FloatingWindowService.isRunning();
-
-        if (floatOn) {
-            floatingWindowButton.setText(R.string.floating_window_disable);
-        } else {
-            floatingWindowButton.setText(R.string.floating_window_enable);
-        }
-
-        // AI 状态
-        boolean hasApiKey = !new SecurePrefs(this).getApiKey().isEmpty();
-        if (hasApiKey) {
-            aiStatusText.setText(R.string.ai_status_thinking);
-            aiDot.setBackgroundResource(R.drawable.bg_status_active);
-        } else {
-            aiStatusText.setText(R.string.ai_status_idle);
-            aiDot.setBackgroundResource(R.drawable.bg_status_inactive);
-        }
-
-        // 状态文字 + 指示灯
-        if (screenOn && floatOn) {
-            statusText.setText("监听中 · 屏幕捕获 · AI 陪看");
-            statusDot.setBackgroundResource(R.drawable.bg_status_active);
-        } else if (screenOn) {
-            statusText.setText("监听中 · 屏幕捕获");
-            statusDot.setBackgroundResource(R.drawable.bg_status_active);
-        } else if (isServiceRunning) {
-            statusText.setText("监听中");
-            statusDot.setBackgroundResource(R.drawable.bg_status_active);
-        } else {
-            statusText.setText("未开启服务");
-            statusDot.setBackgroundResource(R.drawable.bg_status_inactive);
-            screenCaptureButton.setText("开启屏幕捕获");
-        }
-    }
-
-    /**
-     * 检查无障碍服务是否已启用。
-     */
-    private boolean isAccessibilityServiceEnabled() {
-        String serviceName = getPackageName() + "/" + DouyinCommentService.class.getCanonicalName();
+    static boolean isAccessibilityServiceEnabled(android.content.Context context) {
+        String serviceName = context.getPackageName() + "/" + DouyinCommentService.class.getCanonicalName();
         try {
             int accessibilityEnabled = Settings.Secure.getInt(
-                    getContentResolver(),
+                    context.getContentResolver(),
                     Settings.Secure.ACCESSIBILITY_ENABLED
             );
             if (accessibilityEnabled == 1) {
                 String settingValue = Settings.Secure.getString(
-                        getContentResolver(),
+                        context.getContentResolver(),
                         Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
                 );
                 if (settingValue != null) {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**左右 (ZuoYou)** — an Android app that gives AI a physical embodiment. The app uses Android AccessibilityService to extract content from Douyin (抖音) in real-time and MediaProjection to capture screen frames, fused into a structured context for downstream AI processing.
+**可不 (KAFU)** — an Android app that gives AI a physical embodiment. The app uses Android AccessibilityService to extract content from Douyin (抖音) in real-time and MediaProjection to capture screen frames, fused into a structured context for downstream AI processing. The AI persona is 「可不（KAFU）」, a gentle, clumsy anime girl who comments on Douyin videos with warmth and humor.
 
 The ultimate vision: a physical desktop robot (ESP32-S3 + LCD + servo) that reacts to what the user is watching with expressions, comments, and movements.
 
@@ -71,10 +71,10 @@ app/src/main/java/com/zuoyou/commentcollector/
 ├── DouyinCommentService.java    # AccessibilityService — 5s timer + three-state diff + AI trigger
 ├── ScreenCaptureService.java    # Phase 2 — MediaProjection screen capture service
 ├── SecurePrefs.java             # EncryptedSharedPreferences wrapper for API Key storage
-├── AiService.java               # DeepSeek API client (fixed prompt + retry + cancel safety)
+├── AiService.java               # DeepSeek API client (KAFU persona prompt + retry + cancel safety)
 ├── FloatingWindowService.java   # System overlay — bubble / comment list / evaluation card
-├── SettingsActivity.java        # API key config UI
-└── MainActivity.java            # Launcher — service status & enable guide
+├── SettingsActivity.java        # Accessibility service toggle + API key config
+└── MainActivity.java            # Launcher — DrawerLayout with service controls
 
 app/src/test/java/com/zuoyou/commentcollector/
 └── CommentParserTest.java       # Unit tests for CommentParser (25 test cases)
@@ -155,7 +155,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
            │ sendComment(text)
 ┌──────────▼────────────────────────────────────┐
 │           AiService                           │
-│  Fixed SYSTEM_PROMPT (抖音搭子风格)             │
+│  SYSTEM_PROMPT (可不 KAFU persona)             │
 │  content hash dedup + cancel safety            │
 │  OkHttp POST → DeepSeek API                   │
 │  3x exponential backoff retry (1s/2s/4s)      │
@@ -343,14 +343,21 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 | `ZuoYouContext` | ContextBuilder | 融合上下文 JSON 输出 |
 | `ZuoYouAI` | AiService | AI 调用日志（配置、请求、响应） |
 | `ZuoYouFloat` | FloatingWindowService | 悬浮窗生命周期与交互日志 |
+| `ZuoYouMain` | MainActivity | 主界面 + 侧边栏操作日志 |
 
 ## Phase 4: AI Service + Floating Window
 
 ### AI 服务（AiService）
 
-固定 system prompt（抖音搭子风格），两种调用入口：
+固定 system prompt（可不 KAFU 性格设定），两种调用入口：
 - `sendComment(String text)` — 自动模式（定时器触发，发送最高分评论文本）
 - `evaluateComment(Comment comment)` — 手动模式（用户点击评论列表中的某条）
+
+**可不（KAFU）角色设定：**
+- 16-18岁迷糊少女，天然呆、温柔、共情力强
+- 说话轻柔软糯，常用「えっ……？」、「そうなの？」
+- 互动风格：接地气有网感，搞笑评论跟着笑，emo评论温柔共情，主打安慰治愈
+- 偶尔提及咖喱乌冬、音乐等个人爱好
 
 **核心机制：**
 - 内容哈希去重：相同评论不重复调用
@@ -385,3 +392,39 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 
 - `com.squareup.okhttp3:okhttp:4.12.0` — HTTP 客户端
 - `androidx.security:security-crypto:1.1.0-alpha06` — EncryptedSharedPreferences
+
+## UI Redesign (2026-06-19) — 冰蓝色调 + DrawerLayout
+
+**App 名称变更：** 左右 → 可不 (KAFU)
+
+**主界面重设计：**
+- 移除：运行状态卡片、快速上手指南、顶部品牌头部
+- 新增：DrawerLayout 右侧抽屉导航
+- 主内容：居中展示品牌图片 + App 名称
+- 侧边栏：合并服务开关（悬浮窗+屏幕捕获）+ 设置入口
+
+**配色方案（冰蓝色调）：**
+- 主色：`#7EB6D9`（冰蓝）
+- 背景：`#EDF4F8`（淡蓝灰）
+- 文字：`#1A2A3A`（深蓝灰）
+- 状态栏：冰蓝色，深色图标
+
+**设置页重构：**
+- 新增无障碍服务状态卡片（开启/关闭按钮，跳转系统设置）
+- 移除头部橙色渐变和底部提示文字
+- 保存按钮改为蓝色渐变
+
+**悬浮窗：**
+- 边框色从橙色改为冰蓝色
+- 图标更新为新的粉发动漫角色
+
+**侧边栏服务控制：**
+- 悬浮窗 + 屏幕捕获合并为一个开关
+- 开启顺序：先悬浮窗 → 再屏幕捕获
+- 关闭顺序：先屏幕捕获 → 再悬浮窗
+
+**删除的 drawable 文件（11个）：**
+bg_header.xml, bg_settings_header.xml, bg_button_orange.xml, bg_button_blue.xml, bg_button_green.xml, ripple_button_orange.xml, ripple_button_blue.xml, ripple_button_green.xml, bg_button_outline.xml, bg_chip_active.xml, spinner_bg.xml
+
+**新增的 drawable 文件（6个）：**
+bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_item.xml, selector_drawer_item.xml, ic_menu.xml
