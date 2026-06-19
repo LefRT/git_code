@@ -40,6 +40,9 @@ public class DouyinCommentService extends AccessibilityService {
     /** 最近一次 STATE_CHANGED 事件时间戳（防抖） */
     private long lastStateChangedTime = 0;
 
+    /** 最近一次 CONTENT_CHANGED 事件时间戳（防抖） */
+    private long lastContentChangedTime = 0;
+
     private CommentCollector collector;
     private ContextBuilder contextBuilder;
     private AiService aiService;
@@ -59,8 +62,9 @@ public class DouyinCommentService extends AccessibilityService {
         super.onCreate();
         timerHandler = new Handler(Looper.getMainLooper());
 
-        // 创建 Context Builder
-        contextBuilder = new ContextBuilder();
+        // 创建 Context Builder（服务重启时复用已有实例，保留环形缓冲区数据）
+        ContextBuilder existing = ContextBuilder.getInstance();
+        contextBuilder = existing != null ? existing : new ContextBuilder();
 
         // Phase 4: AI 服务
         aiService = new AiService(this);
@@ -124,6 +128,10 @@ public class DouyinCommentService extends AccessibilityService {
 
         // ── 内容变化 → 仅用于检测前台状态 ──
         if (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            long now = System.currentTimeMillis();
+            if (now - lastContentChangedTime < 500) return;
+            lastContentChangedTime = now;
+
             if (!isForeground) {
                 isForeground = true;
                 timerHandler.post(timerRunnable);
@@ -157,7 +165,10 @@ public class DouyinCommentService extends AccessibilityService {
             // 2. 与上轮对比
             CommentDiffer.DiffResult diff = CommentDiffer.diff(previousComments, currentComments);
 
-            // 3. 根据变化状态处理
+            // 3. 更新当前屏幕上的完整评论列表（供悬浮窗显示）
+            contextBuilder.setCurrentVisibleComments(currentComments);
+
+            // 4. 根据变化状态处理
             switch (diff.status()) {
                 case NO_UPDATE:
                     Log.d(TAG, "评论无更新");
@@ -181,14 +192,14 @@ public class DouyinCommentService extends AccessibilityService {
                     break;
             }
 
-            // 4. 更新上轮记录
+            // 5. 更新上轮记录
             previousComments = currentComments;
 
         } finally {
             rootNode.recycle();
         }
 
-        // 5. 截屏
+        // 6. 截屏
         if (ScreenCaptureService.isRunning) {
             ScreenCaptureService.captureOnce();
         }

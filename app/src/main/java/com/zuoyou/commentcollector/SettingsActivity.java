@@ -100,26 +100,25 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void saveConfig() {
         String apiKey = apiKeyEdit.getText().toString().trim();
+        String apiBaseUrl = apiBaseUrlEdit.getText().toString().trim();
+        if (apiBaseUrl.isEmpty()) {
+            apiBaseUrl = Constants.DEFAULT_API_BASE_URL;
+        }
+        String model = modelNameEdit.getText().toString().trim();
+        if (model.isEmpty()) model = Constants.DEFAULT_MODEL_NAME;
+
+        // 先保存非 API Key 的配置（即使 API Key 为空也不丢弃用户已编辑的 URL 和模型）
+        SharedPreferences.Editor editor = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit();
+        editor.putString(Constants.KEY_API_BASE_URL, apiBaseUrl);
+        editor.putString(Constants.KEY_MODEL_NAME, model);
+        editor.apply();
+
         if (apiKey.isEmpty()) {
             Toast.makeText(this, R.string.api_key_missing, Toast.LENGTH_SHORT).show();
             return;
         }
 
-        String apiBaseUrl = apiBaseUrlEdit.getText().toString().trim();
-        if (apiBaseUrl.isEmpty()) {
-            apiBaseUrl = Constants.DEFAULT_API_BASE_URL;
-        }
-
         securePrefs.saveApiKey(apiKey);
-
-        SharedPreferences.Editor editor = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit();
-        editor.putString(Constants.KEY_API_BASE_URL, apiBaseUrl);
-
-        String model = modelNameEdit.getText().toString().trim();
-        if (model.isEmpty()) model = Constants.DEFAULT_MODEL_NAME;
-        editor.putString(Constants.KEY_MODEL_NAME, model);
-
-        editor.apply();
 
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
         finish();

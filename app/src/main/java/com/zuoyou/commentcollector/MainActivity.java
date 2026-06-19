@@ -6,6 +6,8 @@ import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.widget.ImageButton;
@@ -28,6 +30,9 @@ public class MainActivity extends AppCompatActivity {
     // 侧边栏合并服务开关
     private TextView drawerServiceStatus;
     private TextView drawerServiceToggle;
+
+    /** 用于延迟更新抽屉状态（服务停止是异步的） */
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     /**
      * Android 13+ 通知权限请求（前台服务必需）。
@@ -54,6 +59,7 @@ public class MainActivity extends AppCompatActivity {
                             Log.d(TAG, "屏幕捕获已启动");
                         } else {
                             Log.d(TAG, "屏幕捕获授权被拒绝");
+                            Toast.makeText(this, "屏幕捕获权限被拒绝", Toast.LENGTH_SHORT).show();
                         }
                         updateDrawerStatus();
                     });
@@ -112,6 +118,12 @@ public class MainActivity extends AppCompatActivity {
                     startService(intent);
                 }
                 Toast.makeText(this, "服务已关闭", Toast.LENGTH_SHORT).show();
+                // 乐观更新 UI（服务停止异步，但状态已确定）
+                drawerServiceStatus.setText("未开启");
+                drawerServiceToggle.setText("开启");
+                drawerServiceToggle.setBackgroundResource(R.drawable.bg_button_primary);
+                // 延迟同步确认（等待服务处理器执行完毕）
+                mainHandler.postDelayed(this::updateDrawerStatus, 150);
             } else {
                 // 开启：先悬浮窗，再屏幕捕获
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
@@ -145,14 +157,24 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 更新侧边栏合并服务的状态显示。
+     * 同时检查无障碍服务状态，提醒用户基础服务未运行。
      */
     private void updateDrawerStatus() {
-        boolean running = FloatingWindowService.isRunning() || ScreenCaptureService.isRunning;
-        drawerServiceStatus.setText(running ? "运行中" : "未开启");
-        drawerServiceToggle.setText(running ? "关闭" : "开启");
-        drawerServiceToggle.setBackgroundResource(running
-                ? R.drawable.bg_button_close
-                : R.drawable.bg_button_primary);
+        boolean screenOrFloat = ScreenCaptureService.isRunning || FloatingWindowService.isRunning();
+        boolean a11yEnabled = isAccessibilityServiceEnabled(this);
+        if (screenOrFloat) {
+            if (!a11yEnabled) {
+                drawerServiceStatus.setText("⚠ 运行中（无障碍服务未开启）");
+            } else {
+                drawerServiceStatus.setText("运行中");
+            }
+            drawerServiceToggle.setText("关闭");
+            drawerServiceToggle.setBackgroundResource(R.drawable.bg_button_close);
+        } else {
+            drawerServiceStatus.setText("未开启");
+            drawerServiceToggle.setText("开启");
+            drawerServiceToggle.setBackgroundResource(R.drawable.bg_button_primary);
+        }
     }
 
     /**
@@ -181,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             startService(intent);
         }
+        Toast.makeText(this, "悬浮窗已开启", Toast.LENGTH_SHORT).show();
         Log.d(TAG, "悬浮窗已启动");
     }
 

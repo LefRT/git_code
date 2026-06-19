@@ -165,7 +165,9 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 ┌──────────▼────────────────────────────────────┐
 │      FloatingWindowService                    │
 │  气泡态 (48dp) → 评论列表 (点击评价)           │
-│  → AI 评价卡片 (320dp, 5s auto-hide)          │
+│  → AI 评价卡片 (自适应宽度 200~360dp)          │
+│  气泡始终可见，卡片从气泡下方展开                │
+│  打字指示器 ··· + 自适应收回 2.5~12s          │
 │  初始位置: 左侧边 + 垂直30%                    │
 │  消息缓冲 (max 3) + 边缘吸附                  │
 └───────────────────────────────────────────────┘
@@ -219,7 +221,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 - **AccessibilityNodeInfo leak fix**: `findLikeCount` and `collectRecursive` now use `try-finally` to guarantee `recycle()` on all `getChild()`/`getParent()` wrappers.
 - **compress() return check**: `saveBitmapToCache()` now checks `bitmap.compress()` return value.
 - **Data race fix**: `totalCommentCount` read in `buildContext()` is now inside `synchronized(recentComments)`.
-- **Dedup key collision fix**: Changed from `user + "|" + text` to `Objects.hash(user, text)`.
+- **Dedup key collision fix**: CommentCollector changed to `Objects.hash(user, text)` (CommentDiffer was fixed later on 2026-06-19).
 - **Debounce completeness**: `TYPE_WINDOW_STATE_CHANGED` is now also debounced.
 - **JSON exception logging**: `AppContext.toJson()` now logs the exception via `Log.e`.
 - **I/O reduction**: `cleanupOldCaptures()` uses `mCaptureCount` counter to skip filesystem checks.
@@ -369,9 +371,22 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 ### 悬浮窗（FloatingWindowService）
 
 三态 UI：
-- **气泡态** (48dp) — 可拖拽，初始位置左侧边 + 垂直 30%
-- **评论列表态** — 点击气泡展开，显示 "昵称 (赞数)"，点击某条发给 AI 评价
-- **评价结果态** — 320dp 宽卡片，最多 6 行，5s 自动收回
+- **气泡态** (48dp) — 冰蓝外发光环 + 呼吸脉动动画，可拖拽，初始位置左侧边 + 垂直 30%
+- **评论列表态** — 点击气泡展开，显示评论者头像圆圈（首字符 + 冰蓝色）、昵称、❤ 赞数，可滚动
+- **评价结果态** — AI 评价卡片从气泡下方展开（气泡始终可见），自适应宽度 200~360dp
+
+**自适应宽度：**
+- 根据 AI 回复最长一行使用 `Paint.measureText()` 测量像素宽度，动态计算
+- 范围 200dp（短句）~ 360dp（长文本），高度按黄金比例（宽/φ）同步调整
+
+**自适应收回时间：**
+- 公式：`clamp(字数 × 45ms + 2000ms, 2.5s, 12s)`
+- 短回复 2.5s，中长回复 5~8s，长文 12s
+- `showEvaluationResult()` 设置计时，`showEvaluation()` 为占位文字（无自动收回）
+
+**打字指示器：**
+- AI 思考时显示三个跳动点 ···，真实回复到达后隐藏
+- 循环淡入动画，随 typingIndicator 可见性自动启停
 
 **其他特性：**
 - 消息缓冲：服务未运行时暂存最多 3 条 AI 回复，启动后自动刷新
@@ -428,3 +443,41 @@ bg_header.xml, bg_settings_header.xml, bg_button_orange.xml, bg_button_blue.xml,
 
 **新增的 drawable 文件（6个）：**
 bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_item.xml, selector_drawer_item.xml, ic_menu.xml
+
+## Code Review Fixes (2026-06-19) — 15 findings + UI redesign
+
+**ContextBuilder fixes:**
+- **Singleton guard**: Constructor no longer unconditionally overwrites `sInstance`. On service restart, `DouyinCommentService.onCreate()` reuses existing instance via `ContextBuilder.getInstance()` — prevents FloatingWindow from seeing blank data mid-session
+- **Thread safety**: `buildContext()` now synchronizes `SimpleDateFormat.format()` like all other callers (latent race)
+- **Comment cap**: `getCurrentVisibleComments()` caps at 10 entries to prevent floating window overflow
+- **Dead code removed**: `getLatestNewComments()` removed — no callers after static entry point was changed
+
+**MainActivity fixes:**
+- **Stale drawer state**: `updateDrawerStatus()` now does optimistic UI update on close + `postDelayed(150ms)` sync correction (service STOP is async)
+- **Missing Toasts**: Restored `"屏幕捕获权限被拒绝"` and `"悬浮窗已开启"` Toast calls that were lost in the refactor
+- **Accessibility status**: Drawer status now shows "⚠ 运行中（无障碍服务未开启）" when accessibility service is off
+
+**SettingsActivity fix:**
+- **Save order**: Saves `apiBaseUrl` and `modelName` before checking API key — edits no longer silently dropped on empty key
+
+**AiService fixes:**
+- **Retry history**: Moved `recentResponses` append from `callApiWithRetry` to `callApi` — retry path no longer duplicates history 3x into the prompt
+- **Config reload**: `sendComment()` (auto timer) now calls `loadConfig()` — API key changes take effect immediately
+
+**DouyinCommentService fix:**
+- **Debounce completeness**: Added 500ms debounce for `TYPE_WINDOW_CONTENT_CHANGED` (was missing, only STATE_CHANGED had one)
+
+**CommentDiffer fix:**
+- **Collision-free dedup**: `makeKey()` changed from `user + "|" + text` to `Objects.hash(user, text)` — the fix documented in CLAUDE.md but never actually applied to CommentDiffer
+
+**ScreenCaptureService fix:**
+- **Pre-allocated pixel array**: Added `reusablePixels` alongside `reusableBitmap` — avoids ~2MB int[] allocation per capture frame
+
+**FloatingWindowService UI redesign:**
+- **Bubble always visible**: Root layout changed from FrameLayout to LinearLayout (bubble above, card below)
+- **Scrollable evaluation**: `evaluationText` wrapped in ScrollView (max height by golden ratio w/φ)
+- **Comment avatars**: Avatar circle (initial char + hash-based ice-blue color) + username + heart like count
+- **Smooth transitions**: Card fades in from below on expand, scales out on collapse
+- **Adaptive width**: Card width 200~360dp based on `Paint.measureText()` of longest text line
+- **Adaptive display time**: Auto-dismiss = `clamp(chars x 45ms + 2000ms, 2.5s, 12s)`
+- **Typing indicator**: Three bouncing dots during AI thinking, hidden on real response

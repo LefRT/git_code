@@ -134,6 +134,9 @@ public class AiService {
     public synchronized void sendComment(String text) {
         if (shutdown || text == null || text.isEmpty()) return;
 
+        // 定时器路径也重新加载配置（用户可能在 Settings 中修改了 API Key）
+        loadConfig();
+
         // 内容哈希：相同评论跳过
         int hash = text.hashCode();
         if (hash == lastContentHash) return;
@@ -193,6 +196,16 @@ public class AiService {
     }
 
     private void callApi(String systemPrompt, String userMessage) {
+        // 附加上次回复避免重复（在 callApi 层做，避免重试时重复追加）
+        synchronized (recentResponses) {
+            if (!recentResponses.isEmpty()) {
+                StringBuilder historySb = new StringBuilder("\n\n你之前已经说过的（不要重复）：\n");
+                for (String r : recentResponses) {
+                    historySb.append("• ").append(r).append("\n");
+                }
+                userMessage += historySb.toString();
+            }
+        }
         callApiWithRetry(systemPrompt, userMessage, 0);
     }
 
@@ -204,18 +217,7 @@ public class AiService {
             return;
         }
 
-        // 附加上次回复避免重复
-        synchronized (recentResponses) {
-            if (!recentResponses.isEmpty()) {
-                StringBuilder historySb = new StringBuilder("\n\n你之前已经说过的（不要重复）：\n");
-                for (String r : recentResponses) {
-                    historySb.append("• ").append(r).append("\n");
-                }
-                userMessage += historySb.toString();
-            }
-        }
-
-        // 创建 final 副本供内部类引用
+        // 创建 final 副本供内部类引用（注意：history 已在 callApi 层追加，此处的 userMessage 已经是完整消息）
         final String finalSystemPrompt = systemPrompt;
         final String finalUserMessage = userMessage;
 

@@ -102,6 +102,9 @@ public class ScreenCaptureService extends Service {
     /** 预分配的 Bitmap 缓冲区（避免每帧分配 ~518KB） */
     private Bitmap reusableBitmap;
 
+    /** 预分配的像素数组（避免每帧分配 ~2MB int[]） */
+    private int[] reusablePixels;
+
     // ── 静态方法 ──
 
     public static void setContextBuilder(ContextBuilder builder) {
@@ -230,8 +233,9 @@ public class ScreenCaptureService extends Service {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null, backgroundHandler);
 
-        // 预分配 Bitmap 缓冲区
+        // 预分配 Bitmap + 像素数组缓冲区
         reusableBitmap = Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888);
+        reusablePixels = new int[captureWidth * captureHeight];
 
         isRunning = true;
         Log.d(TAG, "屏幕捕获已启动: " + captureWidth + "x" + captureHeight
@@ -257,6 +261,7 @@ public class ScreenCaptureService extends Service {
             reusableBitmap.recycle();
             reusableBitmap = null;
         }
+        reusablePixels = null;
 
         stopBackgroundThread();
         Log.d(TAG, "屏幕捕获已停止");
@@ -321,12 +326,13 @@ public class ScreenCaptureService extends Service {
         int rowStride = plane.getRowStride();
         int rowPadding = rowStride - pixelStride * width;
 
-        if (reusableBitmap == null || reusableBitmap.isRecycled()) {
+        if (reusableBitmap == null || reusableBitmap.isRecycled()
+                || reusablePixels == null || reusablePixels.length < width * height) {
             return null;
         }
 
-        // 复用预分配的 Bitmap — 通过 setPixels 直接写入
-        int[] pixels = new int[width * height];
+        // 复用预分配的 Bitmap + 像素数组 — 避免每帧 ~2MB 分配
+        int[] pixels = reusablePixels;
         buffer.rewind();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {

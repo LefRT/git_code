@@ -30,15 +30,33 @@ public class ContextBuilder {
     /** 静态引用，供 FloatingWindowService 读取最新评论 */
     private static volatile ContextBuilder sInstance = null;
 
+    /**
+     * 获取 ContextBuilder 单例（供外部复用，服务重启时保留数据）。
+     */
+    public static ContextBuilder getInstance() {
+        return sInstance;
+    }
+
     private final LinkedList<Comment> recentComments = new LinkedList<>();
     private final LinkedList<String> recentScreenshots = new LinkedList<>();
     private final LinkedList<TimelineEvent> timeline = new LinkedList<>();
+
+    /** 当前屏幕上的完整评论列表（每轮 doTimerTick 更新） */
+    private volatile List<Comment> currentVisibleComments = List.of();
+
+    /** 悬浮窗显示的评论数量上限（避免无滚动列表溢出屏幕） */
+    private static final int FLOATING_WINDOW_MAX_COMMENTS = 10;
 
     private int totalCommentCount = 0;
     private volatile Listener listener;
 
     public ContextBuilder() {
-        sInstance = this;
+        // 服务重启时复用已有实例，避免 FloatingWindow 读取到空数据
+        if (sInstance != null) {
+            Log.w(TAG, "ContextBuilder 已存在，复用旧实例（保留环形缓冲区数据）");
+        } else {
+            sInstance = this;
+        }
     }
 
     // 缓存时间格式化器（非线程安全，但在单线程推送中没问题）
@@ -131,21 +149,32 @@ public class ContextBuilder {
     }
 
     /**
-     * 获取最新的评论列表（供悬浮窗显示评论者昵称）。
+     * 更新当前屏幕上的完整评论列表（每轮 doTimerTick 调用）。
      */
-    public List<Comment> getLatestNewComments() {
-        synchronized (recentComments) {
-            return List.copyOf(recentComments);
-        }
+    public void setCurrentVisibleComments(List<Comment> comments) {
+        currentVisibleComments = comments != null ? List.copyOf(comments) : List.of();
     }
 
     /**
-     * 静态入口：获取最新评论列表（供 FloatingWindowService 使用）。
+     * 获取当前屏幕上的完整评论列表（供悬浮窗显示）。
+     * 超出 {@value #FLOATING_WINDOW_MAX_COMMENTS} 条时截断，避免无滚动列表溢出。
+     */
+    public List<Comment> getCurrentVisibleComments() {
+        List<Comment> list = currentVisibleComments;
+        int size = list.size();
+        if (size > FLOATING_WINDOW_MAX_COMMENTS) {
+            return list.subList(0, FLOATING_WINDOW_MAX_COMMENTS);
+        }
+        return list;
+    }
+
+    /**
+     * 静态入口：获取当前屏幕上的完整评论列表（供 FloatingWindowService 使用）。
      */
     public static List<Comment> getLatestCommentsStatic() {
         ContextBuilder instance = sInstance;
         if (instance == null) return List.of();
-        return instance.getLatestNewComments();
+        return instance.getCurrentVisibleComments();
     }
 
     // ──────────────────────────────────────────────
@@ -172,9 +201,14 @@ public class ContextBuilder {
             timelineSnapshot = List.copyOf(timeline);
         }
 
+        String timestamp;
+        synchronized (timestampFormat) {
+            timestamp = timestampFormat.format(new Date());
+        }
+
         return new AppContext(
                 "抖音",
-                timestampFormat.format(new Date()),
+                timestamp,
                 snapshotCount,
                 commentsSnapshot,
                 latestScreenshot,

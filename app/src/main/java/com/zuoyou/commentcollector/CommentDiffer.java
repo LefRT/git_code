@@ -3,6 +3,7 @@ package com.zuoyou.commentcollector;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -121,7 +122,7 @@ public final class CommentDiffer {
     }
 
     private static String makeKey(Comment c) {
-        return c.user() + "|" + (c.text() != null ? c.text() : "");
+        return String.valueOf(Objects.hash(c.user(), c.text()));
     }
 
     // ───── 结果类型 ─────
