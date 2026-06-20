@@ -121,9 +121,22 @@ public class ChatSessionManager {
     private final List<SessionInfo> indexCache = new ArrayList<>();
     private int nextId = 1;
 
-    // ─── 构造 ───
+    // ─── 单例 ───
 
-    public ChatSessionManager(Context context) {
+    private static volatile ChatSessionManager sInstance;
+
+    public static ChatSessionManager getInstance(Context context) {
+        if (sInstance == null) {
+            synchronized (ChatSessionManager.class) {
+                if (sInstance == null) {
+                    sInstance = new ChatSessionManager(context.getApplicationContext());
+                }
+            }
+        }
+        return sInstance;
+    }
+
+    private ChatSessionManager(Context context) {
         chatDir = new File(context.getFilesDir(), DIR_NAME);
         if (!chatDir.exists()) {
             chatDir.mkdirs();
@@ -232,12 +245,20 @@ public class ChatSessionManager {
      */
     public synchronized boolean deleteSession(int sessionId) {
         File file = getSessionFile(sessionId);
-        boolean deleted = file.exists() && file.delete();
+        boolean fileExists = file.exists();
+        boolean deleted = !fileExists || file.delete();
 
-        indexCache.removeIf(s -> s.id == sessionId);
-        saveIndex();
-
-        Log.d(TAG, "删除会话 #" + sessionId + ": " + (deleted ? "成功" : "文件不存在"));
+        // Only remove from index if file is actually gone (deleted or never existed)
+        if (deleted) {
+            int beforeSize = indexCache.size();
+            indexCache.removeIf(s -> s.id == sessionId);
+            int afterSize = indexCache.size();
+            saveIndex();
+            Log.d(TAG, "删除会话 #" + sessionId
+                    + " 文件存在=" + fileExists + " 索引: " + beforeSize + "→" + afterSize);
+        } else {
+            Log.w(TAG, "删除会话 #" + sessionId + " 失败: 文件无法删除 " + file.getAbsolutePath());
+        }
         return deleted;
     }
 
@@ -308,7 +329,9 @@ public class ChatSessionManager {
             }
             root.put("sessions", arr);
 
-            writeFile(new File(chatDir, INDEX_FILE), root.toString(2));
+            String json = root.toString(2);
+            writeFile(new File(chatDir, INDEX_FILE), json);
+            Log.d(TAG, "saveIndex: 写入 " + indexCache.size() + " 个会话到 " + INDEX_FILE);
         } catch (JSONException e) {
             Log.e(TAG, "序列化索引失败", e);
         }

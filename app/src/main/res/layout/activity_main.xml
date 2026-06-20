@@ -8,55 +8,155 @@
     android:background="@drawable/bg_main_gradient">
 
     <!-- ═══ 主内容：品牌展示 ═══ -->
-    <LinearLayout
+    <FrameLayout
+        android:id="@+id/mainContentWrapper"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="center">
+        android:layout_height="match_parent">
 
-        <!-- 菜单按钮（右上角） -->
-        <FrameLayout
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="match_parent"
+            android:orientation="vertical">
 
-            <ImageButton
-                android:id="@+id/menuButton"
-                android:layout_width="48dp"
+            <!-- 展示图片（双击→聊天，拖拽→音乐面板） -->
+            <ImageView
+                android:id="@+id/characterImage"
+                android:layout_width="280dp"
+                android:layout_height="280dp"
+                android:layout_gravity="center_horizontal"
+                android:src="@drawable/home_showcase"
+                android:scaleType="centerCrop"
+                android:clipToOutline="true"
+                android:outlineProvider="background"
+                android:background="@drawable/bg_card" />
+
+        </LinearLayout>
+
+        <!-- 菜单按钮（屏幕右上角，不紧贴边缘） -->
+        <ImageButton
+            android:id="@+id/menuButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="end|top"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_menu"
+            android:contentDescription="菜单"
+            android:scaleType="center" />
+
+        <!-- 音乐面板（由代码动态添加到此 FrameLayout） -->
+
+        <!-- ═══ 聊天界面（内嵌，初始隐藏在屏幕下方） ═══ -->
+        <LinearLayout
+            android:id="@+id/chatContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="invisible"
+            android:background="@color/bg_page">
+
+            <!-- 顶栏（返回 + 标题） -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:layout_gravity="end|top"
-                android:layout_margin="16dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_menu"
-                android:contentDescription="菜单"
-                android:scaleType="center" />
-        </FrameLayout>
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="4dp"
+                android:paddingEnd="16dp"
+                android:background="@color/bg_card"
+                android:elevation="2dp">
 
-        <!-- 展示图片（双击→聊天，左滑→音乐） -->
-        <ImageView
-            android:id="@+id/characterImage"
-            android:layout_width="280dp"
-            android:layout_height="280dp"
-            android:layout_gravity="center_horizontal"
-            android:src="@drawable/home_showcase"
-            android:scaleType="centerCrop"
-            android:clipToOutline="true"
-            android:outlineProvider="background"
-            android:background="@drawable/bg_card" />
+                <ImageButton
+                    android:id="@+id/chatBackButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_back"
+                    android:contentDescription="返回"
+                    android:scaleType="center" />
 
-        <!-- App 名称 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="24dp"
-            android:text="@string/app_name"
-            android:textSize="32sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:letterSpacing="0.1" />
+                <TextView
+                    android:id="@+id/chatTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="和可不聊天"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginStart="8dp" />
 
+                <TextView
+                    android:id="@+id/chatHistoryButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:background="@drawable/bg_button_primary"
+                    android:text="记录"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
 
-    </LinearLayout>
+            <!-- 消息列表 -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/chatMessageList"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:clipToPadding="false"
+                android:padding="12dp" />
+
+            <!-- 输入栏 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="12dp"
+                android:background="@color/bg_card"
+                android:elevation="4dp">
+
+                <EditText
+                    android:id="@+id/chatInput"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:hint="说点什么..."
+                    android:textSize="15sp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:background="@drawable/bg_chat_input"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:imeOptions="actionSend" />
+
+                <TextView
+                    android:id="@+id/chatSendButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:background="@drawable/bg_button_primary"
+                    android:text="发送"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:layout_marginStart="8dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+    </FrameLayout>
 
     <!-- ═══ 左侧抽屉：聊天记录 ═══ -->
     <LinearLayout
@@ -71,16 +171,39 @@
         android:paddingStart="16dp"
         android:paddingEnd="16dp">
 
-        <!-- 标题 -->
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- 标题行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="聊天记录"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginBottom="16dp"
-            android:layout_marginStart="8dp" />
+            android:layout_marginStart="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="聊天记录"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/chatEditButton"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_button_secondary"
+                android:text="删除"
+                android:textSize="12sp"
+                android:textColor="@color/text_primary"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:layout_marginEnd="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
 
         <!-- 会话列表容器 -->
         <ScrollView
@@ -108,7 +231,23 @@
             android:textStyle="bold"
             android:gravity="center"
             android:layout_marginTop="12dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <!-- 删除按钮（编辑模式下显示） -->
+        <TextView
+            android:id="@+id/chatDeleteButton"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_button_close"
+            android:text="删除选中"
+            android:textSize="14sp"
+            android:textColor="@color/text_on_primary"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginTop="8dp"
             android:layout_marginBottom="16dp"
+            android:visibility="gone"
             android:clickable="true"
             android:focusable="true" />
     </LinearLayout>

@@ -106,7 +106,7 @@ public class ChatAiService {
             }
 
             // 3. 历史消息（最近 N 条，避免超出 API token 限制）
-            ChatSessionManager sessionMgr = new ChatSessionManager(appContext);
+            ChatSessionManager sessionMgr = ChatSessionManager.getInstance(appContext);
             List<ChatSessionManager.ChatMessage> history = sessionMgr.loadSession(sessionId);
             int start = Math.max(0, history.size() - Constants.CHAT_HISTORY_MAX_MESSAGES);
             for (int i = start; i < history.size(); i++) {
@@ -203,6 +203,8 @@ public class ChatAiService {
                     if (call.isCanceled()) return;
                     Log.e(TAG, "处理 API 响应异常", e);
                     mainHandler.post(() -> callback.onError("响应处理异常: " + e.getMessage()));
+                } finally {
+                    response.close();
                 }
             }
         });

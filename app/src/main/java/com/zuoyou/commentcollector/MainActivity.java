@@ -1,5 +1,8 @@
 package com.zuoyou.commentcollector;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.Manifest;
 import android.content.Intent;
 import android.media.projection.MediaProjectionManager;
@@ -9,10 +12,15 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -23,11 +31,19 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
-import com.zuoyou.commentcollector.feature.ChatActivity;
+import com.zuoyou.commentcollector.feature.ChatAdapter;
+import com.zuoyou.commentcollector.feature.ChatAiService;
+import com.zuoyou.commentcollector.feature.ChatSessionManager;
 import com.zuoyou.commentcollector.feature.MainImageHandler;
 import com.zuoyou.commentcollector.feature.MemoryCollector;
+import com.zuoyou.commentcollector.feature.MusicMenuPopup;
 import com.zuoyou.commentcollector.feature.MusicPlayer;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -47,9 +63,32 @@ public class MainActivity extends AppCompatActivity {
 
     // 聊天记录
     private LinearLayout chatHistoryContainer;
+    private boolean chatSelectMode = false;
+    private final java.util.Set<Integer> selectedChatSessions = new java.util.HashSet<>();
+    private TextView chatEditButton;
+    private TextView chatDeleteButton;
+    private TextView newChatButton;
 
     // 手势处理器
     private MainImageHandler imageHandler;
+    private ImageView characterImage;
+
+    // ─── 内嵌聊天 ───
+    private LinearLayout chatContainer;
+    private RecyclerView chatMessageList;
+    private EditText chatInput;
+    private TextView chatSendButton;
+    private ChatAdapter chatAdapter;
+    private ChatSessionManager chatSessionManager;
+    private ChatAiService chatAiService;
+    private int chatSessionId = -1;
+    private final List<ChatSessionManager.ChatMessage> chatMessages = new ArrayList<>();
+    private boolean chatWaitingForReply = false;
+    private boolean isChatMode = false;
+    private boolean isAnimating = false;
+    private static final float CHAT_IMAGE_SCALE = 100f / 280f;  // 280dp → 100dp
+    private ValueAnimator imageAnimator;  // stored for cancellation in onDestroy
+    private MusicPlayer.MusicListener musicListener;  // stored for removal in onDestroy
 
     /** 用于延迟更新抽屉状态（服务停止是异步的） */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -93,7 +132,6 @@ public class MainActivity extends AppCompatActivity {
                     result -> {
                         if (Settings.canDrawOverlays(this)) {
                             startFloatingWindowService();
-                            // 悬浮窗启动后，继续请求屏幕捕获
                             requestScreenCapture();
                         } else {
                             Toast.makeText(this, R.string.overlay_permission_denied, Toast.LENGTH_SHORT).show();
@@ -127,24 +165,49 @@ public class MainActivity extends AppCompatActivity {
 
         // 聊天记录
         chatHistoryContainer = findViewById(R.id.chatHistoryContainer);
-        TextView newChatButton = findViewById(R.id.newChatButton);
+        chatEditButton = findViewById(R.id.chatEditButton);
+        chatDeleteButton = findViewById(R.id.chatDeleteButton);
+        newChatButton = findViewById(R.id.newChatButton);
         newChatButton.setOnClickListener(v -> {
             drawerLayout.closeDrawer(chatDrawerView);
-            Intent intent = new Intent(this, ChatActivity.class);
-            intent.putExtra(ChatActivity.EXTRA_SESSION_ID, -1);
-            startActivity(intent);
+            enterChatMode(-1);
         });
 
-        // 左侧抽屉：菜单按钮长按打开聊天记录
-        // （单击仍打开右侧抽屉，双击图片进入聊天）
+        // 编辑按钮：切换多选模式
+        chatEditButton.setOnClickListener(v -> toggleChatSelectMode());
 
-        // 双击/左滑手势
-        ImageView characterImage = findViewById(R.id.characterImage);
-        imageHandler = new MainImageHandler(this, characterImage);
+        // 删除按钮：删除选中的会话
+        chatDeleteButton.setOnClickListener(v -> deleteSelectedChatSessions());
 
-        // 音乐播放器初始化
+        // 音乐播放器初始化（必须在 MusicMenuPopup 之前）
         MusicPlayer.getInstance().init(this);
-        MusicPlayer.getInstance().addListener(new MusicPlayer.MusicListener() {
+
+        // 双击/拖拽手势 + 音乐面板
+        characterImage = findViewById(R.id.characterImage);
+        FrameLayout mainWrapper = findViewById(R.id.mainContentWrapper);
+
+        // 图片居中（gravity="center" 会忽略 topMargin，所以手动计算）
+        characterImage.post(() -> {
+            int centeredTop = (mainWrapper.getHeight() - characterImage.getHeight()) / 2;
+            ViewGroup.MarginLayoutParams imgLp = (ViewGroup.MarginLayoutParams) characterImage.getLayoutParams();
+            imgLp.topMargin = Math.max(0, centeredTop);
+            characterImage.setLayoutParams(imgLp);
+        });
+        MusicMenuPopup musicPanel = new MusicMenuPopup(this);
+        musicPanel.attachTo(mainWrapper);
+        FrameLayout.LayoutParams panelLp = (FrameLayout.LayoutParams) musicPanel.getView().getLayoutParams();
+        panelLp.gravity = Gravity.CENTER_VERTICAL;
+        musicPanel.getView().setLayoutParams(panelLp);
+        musicPanel.getView().setTranslationX(-dpToPx(200));
+
+        // 双击回调 → 播放动画 → 进入聊天
+        imageHandler = new MainImageHandler(this, characterImage, musicPanel, () -> {
+            if (!isChatMode && !isAnimating) {
+                enterChatMode(-1);
+            }
+        });
+
+        musicListener = new MusicPlayer.MusicListener() {
             @Override
             public void onSongChanged(MusicPlayer.SongInfo song) {
                 runOnUiThread(() -> {
@@ -160,7 +223,8 @@ public class MainActivity extends AppCompatActivity {
             public void onPlayStateChanged(boolean isPlaying) {
                 // 播放状态变化时无需特殊处理
             }
-        });
+        };
+        MusicPlayer.getInstance().addListener(musicListener);
 
         // Android 13+ 需要 POST_NOTIFICATIONS 权限来显示前台通知
         requestNotificationPermission();
@@ -177,10 +241,12 @@ public class MainActivity extends AppCompatActivity {
             return true;
         });
 
+        // ── 内嵌聊天初始化 ──
+        initChat();
+
         // ── 合并服务开关：悬浮窗 + 屏幕捕获 ──
         drawerServiceToggle.setOnClickListener(v -> {
             if (FloatingWindowService.isRunning() || ScreenCaptureService.isRunning) {
-                // 关闭：依次停止屏幕捕获 → 悬浮窗
                 if (ScreenCaptureService.isRunning) {
                     Intent intent = new Intent(this, ScreenCaptureService.class);
                     intent.setAction("STOP_CAPTURE");
@@ -192,14 +258,11 @@ public class MainActivity extends AppCompatActivity {
                     startService(intent);
                 }
                 Toast.makeText(this, "服务已关闭", Toast.LENGTH_SHORT).show();
-                // 乐观更新 UI（服务停止异步，但状态已确定）
                 drawerServiceStatus.setText("未开启");
                 drawerServiceToggle.setText("开启");
                 drawerServiceToggle.setBackgroundResource(R.drawable.bg_button_primary);
-                // 延迟同步确认（等待服务处理器执行完毕）
                 mainHandler.postDelayed(this::updateDrawerStatus, 150);
             } else {
-                // 开启：先悬浮窗，再屏幕捕获
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                         && !Settings.canDrawOverlays(this)) {
                     Intent intent = new Intent(
@@ -223,6 +286,335 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // ═══════════════════════════════════════════════════════
+    // 内嵌聊天
+    // ═══════════════════════════════════════════════════════
+
+    private TextView chatTitle;
+
+    private void initChat() {
+        chatContainer = findViewById(R.id.chatContainer);
+        chatMessageList = findViewById(R.id.chatMessageList);
+        chatInput = findViewById(R.id.chatInput);
+        chatSendButton = findViewById(R.id.chatSendButton);
+        chatTitle = findViewById(R.id.chatTitle);
+        ImageButton chatBackButton = findViewById(R.id.chatBackButton);
+
+        chatSessionManager = ChatSessionManager.getInstance(this);
+        chatAiService = new ChatAiService(this);
+
+        chatAdapter = new ChatAdapter(chatMessages);
+        LinearLayoutManager lm = new LinearLayoutManager(this);
+        lm.setStackFromEnd(true);
+        chatMessageList.setLayoutManager(lm);
+        chatMessageList.setAdapter(chatAdapter);
+
+        chatSendButton.setOnClickListener(v -> sendChatMessage());
+        chatInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                sendChatMessage();
+                return true;
+            }
+            return false;
+        });
+
+        // 返回按钮
+        chatBackButton.setOnClickListener(v -> exitChatMode());
+
+        // 聊天记录按钮（打开右侧抽屉）
+        TextView chatHistoryBtn = findViewById(R.id.chatHistoryButton);
+        chatHistoryBtn.setOnClickListener(v -> {
+            refreshChatHistoryList();
+            drawerLayout.openDrawer(chatDrawerView);
+        });
+    }
+
+    /**
+     * 进入聊天模式：播放 MP4 → 图片上移 + 聊天展开。
+     *
+     * @param sessionId 会话 ID（-1 = 新建会话）
+     */
+    private void enterChatMode(int sessionId) {
+        if (isAnimating) return;
+
+        // Already in chat mode — just switch session (no animation needed)
+        if (isChatMode) {
+            chatAiService.cancel();  // cancel in-flight request from old session
+            if (sessionId == -1) {
+                chatSessionId = chatSessionManager.createNewSession();
+            } else {
+                chatSessionId = sessionId;
+            }
+            chatMessages.clear();
+            chatMessages.addAll(chatSessionManager.loadSession(chatSessionId));
+            chatAdapter.notifyDataSetChanged();
+            chatTitle.setText("可不 · 聊天");
+            chatWaitingForReply = false;
+            chatInput.setEnabled(true);
+            chatSendButton.setAlpha(1f);
+            chatMessageList.post(() -> scrollToChatBottom());
+            return;
+        }
+
+        isAnimating = true;
+
+        // 加载或创建会话
+        if (sessionId == -1) {
+            chatSessionId = chatSessionManager.createNewSession();
+        } else {
+            chatSessionId = sessionId;
+        }
+        chatMessages.clear();
+        chatMessages.addAll(chatSessionManager.loadSession(chatSessionId));
+        chatAdapter.notifyDataSetChanged();
+        chatTitle.setText("可不 · 聊天");
+
+        // TODO: MP4 动画暂跳过，直接展开聊天（AnimationPlayer 回调可能不触发）
+        animateEnterChat();
+    }
+
+    /**
+     * 图片上移 + 聊天从底部滑入。
+     */
+    private void animateEnterChat() {
+        int imgHeight = characterImage.getHeight();  // 980px (280dp)
+
+        // 菜单按钮顶部 = 16dp（FrameLayout 坐标系）
+        int targetTopPx = dpToPx(16);
+
+        // pivotY=0 → 从图片顶部缩放，缩放后底部 = targetTop + 280dp * scale
+        int imgFinalBottom = targetTopPx + (int) (imgHeight * CHAT_IMAGE_SCALE);
+        int chatTopMargin = imgFinalBottom + dpToPx(8);
+
+        Log.d(TAG, "=== animateEnterChat ===");
+        Log.d(TAG, "targetTopPx=" + targetTopPx + ", imgHeight=" + imgHeight);
+        Log.d(TAG, "CHAT_IMAGE_SCALE=" + CHAT_IMAGE_SCALE + ", imgFinalBottom=" + imgFinalBottom);
+        Log.d(TAG, "chatTopMargin=" + chatTopMargin);
+
+        // 聊天容器定位
+        int screenHeight = getScreenHeight();
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) chatContainer.getLayoutParams();
+        lp.topMargin = chatTopMargin;
+        chatContainer.setLayoutParams(lp);
+        chatContainer.setTranslationY(screenHeight);
+        chatContainer.setVisibility(View.VISIBLE);
+
+        // 设置 pivot 到图片顶部中央（缩放从顶部开始）
+        characterImage.setPivotY(0);
+        characterImage.setPivotX(characterImage.getWidth() / 2f);
+
+        // 用 ObjectAnimator 同时驱动 topMargin + scale
+        // topMargin: 从当前居中位置 → targetTopPx
+        ViewGroup.MarginLayoutParams imgLp = (ViewGroup.MarginLayoutParams) characterImage.getLayoutParams();
+        int currentTopMargin = imgLp.topMargin;
+
+        // Cancel any in-flight image animator
+        if (imageAnimator != null) {
+            imageAnimator.cancel();
+        }
+
+        imageAnimator = ValueAnimator.ofFloat(0f, 1f);
+        imageAnimator.setDuration(350);
+        imageAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        imageAnimator.addUpdateListener(anim -> {
+            float fraction = anim.getAnimatedFraction();
+
+            // 图片 topMargin 动画
+            int newTop = (int) (currentTopMargin + (targetTopPx - currentTopMargin) * fraction);
+            ViewGroup.MarginLayoutParams lp2 = (ViewGroup.MarginLayoutParams) characterImage.getLayoutParams();
+            if (lp2.topMargin != newTop) {
+                lp2.topMargin = newTop;
+                characterImage.setLayoutParams(lp2);
+            }
+
+            // 图片缩放动画（从顶部缩放）
+            float scale = 1f - (1f - CHAT_IMAGE_SCALE) * fraction;
+            characterImage.setScaleX(scale);
+            characterImage.setScaleY(scale);
+        });
+        imageAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                isAnimating = false;
+            }
+        });
+        imageAnimator.start();
+
+        // 聊天从底部滑入
+        chatContainer.animate()
+                .translationY(0)
+                .setDuration(350)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
+
+        imageHandler.setChatMode(true, CHAT_IMAGE_SCALE);
+        isChatMode = true;
+        chatMessageList.post(() -> scrollToChatBottom());
+    }
+
+    /**
+     * 退出聊天模式：聊天下滑 + 图片回原位。
+     */
+    private void exitChatMode() {
+        if (!isChatMode || isAnimating) return;
+        isAnimating = true;
+
+        // Cancel in-flight AI request
+        if (chatAiService != null) {
+            chatAiService.cancel();
+        }
+
+        // 聊天下滑出屏幕
+        chatContainer.animate()
+                .translationY(getScreenHeight())
+                .setDuration(300)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(() -> chatContainer.setVisibility(View.INVISIBLE))
+                .start();
+
+        // 图片回原位：topMargin 恢复居中 + scale 恢复 1.0
+        ViewGroup.MarginLayoutParams imgLp = (ViewGroup.MarginLayoutParams) characterImage.getLayoutParams();
+        int currentTopMargin = imgLp.topMargin;
+        // 计算居中位置：(FrameLayout高度 - 图片高度) / 2
+        FrameLayout wrapper = findViewById(R.id.mainContentWrapper);
+        int centeredTopMargin = (wrapper.getHeight() - characterImage.getHeight()) / 2;
+
+        // Cancel any in-flight image animator
+        if (imageAnimator != null) {
+            imageAnimator.cancel();
+        }
+
+        imageAnimator = ValueAnimator.ofFloat(0f, 1f);
+        imageAnimator.setDuration(300);
+        imageAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator());
+        imageAnimator.addUpdateListener(anim -> {
+            float fraction = anim.getAnimatedFraction();
+
+            // topMargin 动画
+            int newTop = (int) (currentTopMargin + (centeredTopMargin - currentTopMargin) * fraction);
+            ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) characterImage.getLayoutParams();
+            if (lp.topMargin != newTop) {
+                lp.topMargin = newTop;
+                characterImage.setLayoutParams(lp);
+            }
+
+            // 缩放恢复
+            float scale = CHAT_IMAGE_SCALE + (1f - CHAT_IMAGE_SCALE) * fraction;
+            characterImage.setScaleX(scale);
+            characterImage.setScaleY(scale);
+        });
+        imageAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                isAnimating = false;
+                // Restore pivot AFTER animation completes (was top-left during chat mode)
+                characterImage.setPivotY(characterImage.getHeight() / 2f);
+                characterImage.setPivotX(characterImage.getWidth() / 2f);
+                imageHandler.setChatMode(false, 1f);
+                isChatMode = false;
+                // 恢复封面图
+                MusicPlayer.SongInfo song = MusicPlayer.getInstance().getCurrentSong();
+                if (song != null) {
+                    characterImage.setImageResource(song.coverResId());
+                } else {
+                    characterImage.setImageResource(R.drawable.home_showcase);
+                }
+            }
+        });
+        imageAnimator.start();
+    }
+
+    private void sendChatMessage() {
+        String text = chatInput.getText().toString().trim();
+        if (TextUtils.isEmpty(text) || chatWaitingForReply) return;
+
+        // Capture sessionId at send-time — the callback must persist to the session
+        // the user was in when they sent the message, even if they switch sessions later.
+        final int savedSessionId = chatSessionId;
+
+        // 保存用户消息
+        chatSessionManager.saveMessage(savedSessionId, "user", text);
+        chatMessages.add(new ChatSessionManager.ChatMessage("user", text, ""));
+        chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+        scrollToChatBottom();
+
+        chatInput.setText("");
+        setChatWaiting(true);
+
+        // 添加打字指示器
+        chatMessages.add(new ChatSessionManager.ChatMessage("typing", "", ""));
+        chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+        scrollToChatBottom();
+
+        // 调用 AI
+        chatAiService.chat(savedSessionId, text, new ChatAiService.ChatCallback() {
+            @Override
+            public void onResponse(String reply) {
+                removeChatTypingIndicator();
+                chatSessionManager.saveMessage(savedSessionId, "assistant", reply);
+                // Only add to UI if we're still viewing the same session
+                if (chatSessionId == savedSessionId) {
+                    chatMessages.add(new ChatSessionManager.ChatMessage("assistant", reply, ""));
+                    chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+                    scrollToChatBottom();
+                }
+                setChatWaiting(false);
+            }
+
+            @Override
+            public void onError(String error) {
+                removeChatTypingIndicator();
+                String errorText = "（出错了: " + error + "）";
+                if (chatSessionId == savedSessionId) {
+                    chatMessages.add(new ChatSessionManager.ChatMessage("assistant", errorText, ""));
+                    chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+                    scrollToChatBottom();
+                }
+                setChatWaiting(false);
+                Log.e(TAG, "AI 错误: " + error);
+            }
+        });
+    }
+
+    private void removeChatTypingIndicator() {
+        for (int i = chatMessages.size() - 1; i >= 0; i--) {
+            if ("typing".equals(chatMessages.get(i).role())) {
+                chatMessages.remove(i);
+                chatAdapter.notifyItemRemoved(i);
+                break;
+            }
+        }
+    }
+
+    private void setChatWaiting(boolean waiting) {
+        chatWaitingForReply = waiting;
+        chatSendButton.setAlpha(waiting ? 0.5f : 1f);
+        chatInput.setEnabled(!waiting);
+    }
+
+    private void scrollToChatBottom() {
+        if (!chatMessages.isEmpty()) {
+            chatMessageList.post(() -> chatMessageList.smoothScrollToPosition(chatMessages.size() - 1));
+        }
+    }
+
+    private int getScreenHeight() {
+        return getResources().getDisplayMetrics().heightPixels;
+    }
+
+    private int getStatusBarHeight() {
+        int result = 0;
+        int resId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        if (resId > 0) {
+            result = getResources().getDimensionPixelSize(resId);
+        }
+        return result;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 生命周期
+    // ═══════════════════════════════════════════════════════
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -230,10 +622,40 @@ public class MainActivity extends AppCompatActivity {
         refreshChatHistoryList();
     }
 
-    /**
-     * 更新侧边栏合并服务的状态显示。
-     * 同时检查无障碍服务状态，提醒用户基础服务未运行。
-     */
+    @Override
+    public void onBackPressed() {
+        if (isChatMode) {
+            exitChatMode();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Cancel in-flight animations to prevent post-destroy view manipulation
+        if (imageAnimator != null) {
+            imageAnimator.cancel();
+            imageAnimator = null;
+        }
+        // Remove MusicListener to prevent Activity leak via MusicPlayer singleton
+        if (musicListener != null) {
+            MusicPlayer.getInstance().removeListener(musicListener);
+            musicListener = null;
+        }
+        if (imageHandler != null) {
+            imageHandler.release();
+        }
+        if (chatAiService != null) {
+            chatAiService.cancel();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 服务控制
+    // ═══════════════════════════════════════════════════════
+
     private void updateDrawerStatus() {
         boolean screenOrFloat = ScreenCaptureService.isRunning || FloatingWindowService.isRunning();
         boolean a11yEnabled = isAccessibilityServiceEnabled(this);
@@ -252,9 +674,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 请求屏幕捕获权限。
-     */
     private void requestScreenCapture() {
         if (ScreenCaptureService.isRunning) {
             return;
@@ -268,9 +687,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 启动悬浮窗服务。
-     */
     private void startFloatingWindowService() {
         Intent intent = new Intent(this, FloatingWindowService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -282,9 +698,6 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "悬浮窗已启动");
     }
 
-    /**
-     * 检查无障碍服务是否已启用（供设置页使用）。
-     */
     static boolean isAccessibilityServiceEnabled(android.content.Context context) {
         String serviceName = context.getPackageName() + "/" + DouyinCommentService.class.getCanonicalName();
         try {
@@ -307,18 +720,12 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    /**
-     * Android 13+ 请求通知权限（前台服务必需）。
-     */
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
         }
     }
 
-    /**
-     * 更新记忆收集开关 UI。
-     */
     private void updateMemoryToggle(MemoryCollector collector) {
         boolean enabled = collector.isEnabled();
         drawerMemoryToggle.setText(enabled ? "关闭" : "开启");
@@ -328,17 +735,16 @@ public class MainActivity extends AppCompatActivity {
                 : "关闭");
     }
 
-    /**
-     * 刷新左侧抽屉的聊天记录列表。
-     */
+    // ═══════════════════════════════════════════════════════
+    // 聊天记录侧边栏
+    // ═══════════════════════════════════════════════════════
+
     private void refreshChatHistoryList() {
         if (chatHistoryContainer == null) return;
         chatHistoryContainer.removeAllViews();
 
-        com.zuoyou.commentcollector.feature.ChatSessionManager sessionMgr =
-                new com.zuoyou.commentcollector.feature.ChatSessionManager(this);
-        java.util.List<com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo> sessions =
-                sessionMgr.getSessionList();
+        ChatSessionManager sessionMgr = ChatSessionManager.getInstance(this);
+        List<ChatSessionManager.SessionInfo> sessions = sessionMgr.getSessionList();
 
         if (sessions.isEmpty()) {
             TextView empty = new TextView(this);
@@ -351,33 +757,69 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        for (com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo session : sessions) {
-            LinearLayout item = createChatHistoryItem(session);
+        // 用 index 作为显示序号（连续编号）
+        for (int i = 0; i < sessions.size(); i++) {
+            LinearLayout item = createChatHistoryItem(sessions.get(i), i + 1);
             chatHistoryContainer.addView(item);
         }
     }
 
-    private LinearLayout createChatHistoryItem(com.zuoyou.commentcollector.feature.ChatSessionManager.SessionInfo session) {
+    private LinearLayout createChatHistoryItem(ChatSessionManager.SessionInfo session, int displayIndex) {
         int padPx = dpToPx(12);
+        boolean isCurrentSession = isChatMode && chatSessionId == session.id();
 
         LinearLayout item = new LinearLayout(this);
-        item.setOrientation(LinearLayout.VERTICAL);
+        item.setOrientation(LinearLayout.HORIZONTAL);
         item.setPadding(padPx, padPx, padPx, padPx);
         item.setBackgroundResource(R.drawable.selector_drawer_item);
         item.setClickable(true);
         item.setFocusable(true);
+        item.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = dpToPx(4);
         item.setLayoutParams(lp);
 
-        // 标题行：序号 + 时间
+        // 复选框（选择模式下可见）
+        android.widget.CheckBox checkBox = new android.widget.CheckBox(this);
+        checkBox.setVisibility(chatSelectMode ? View.VISIBLE : View.GONE);
+        checkBox.setButtonTintList(android.content.res.ColorStateList.valueOf(0xFF7EB6D9));
+
+        // 当前聊天会话禁止选中
+        if (isCurrentSession) {
+            checkBox.setEnabled(false);
+            checkBox.setAlpha(0.4f);
+        }
+
+        // CheckBox 独立监听器（处理选中/取消，不依赖父布局）
+        int sessionId = session.id();
+        checkBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isCurrentSession) return;  // 当前会话不允许操作
+            if (isChecked) {
+                selectedChatSessions.add(sessionId);
+            } else {
+                selectedChatSessions.remove(sessionId);
+            }
+            Log.d(TAG, "CheckBox变化: session=" + sessionId + " checked=" + isChecked + " selected=" + selectedChatSessions);
+            updateDeleteButton();
+        });
+
+        LinearLayout.LayoutParams cbLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cbLp.rightMargin = dpToPx(4);
+        item.addView(checkBox, cbLp);
+
+        // 内容区域
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView idText = new TextView(this);
-        idText.setText("#" + session.id());
+        idText.setText("#" + displayIndex);  // 连续序号
         idText.setTextSize(14);
         idText.setTextColor(0xFF7EB6D9);
         idText.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -389,10 +831,9 @@ public class MainActivity extends AppCompatActivity {
         timeText.setTextColor(0xFFA8C0D0);
         header.addView(timeText);
 
-        item.addView(header, new ViewGroup.LayoutParams(
+        content.addView(header, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 预览
         TextView preview = new TextView(this);
         preview.setText(session.preview());
         preview.setTextSize(13);
@@ -402,39 +843,95 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         previewLp.topMargin = dpToPx(4);
-        item.addView(preview, previewLp);
+        content.addView(preview, previewLp);
 
-        // 消息数
+        // 当前会话标记
+        String descText;
+        if (isCurrentSession) {
+            descText = "当前会话 · " + session.count() + " 条消息";
+        } else {
+            descText = session.count() + " 条消息";
+        }
         TextView countText = new TextView(this);
-        countText.setText(session.count() + " 条消息");
+        countText.setText(descText);
         countText.setTextSize(11);
-        countText.setTextColor(0xFFA8C0D0);
+        countText.setTextColor(isCurrentSession ? 0xFF7EB6D9 : 0xFFA8C0D0);
         LinearLayout.LayoutParams countLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         countLp.topMargin = dpToPx(2);
-        item.addView(countText, countLp);
+        content.addView(countText, countLp);
 
-        // 点击打开会话
+        item.addView(content);
+
+        // 点击行为
         item.setOnClickListener(v -> {
-            drawerLayout.closeDrawer(chatDrawerView);
-            Intent intent = new Intent(this, ChatActivity.class);
-            intent.putExtra(ChatActivity.EXTRA_SESSION_ID, session.id());
-            startActivity(intent);
+            if (chatSelectMode) {
+                // 选择模式：点击行切换 CheckBox
+                if (!isCurrentSession) {
+                    checkBox.setChecked(!checkBox.isChecked());
+                }
+            } else {
+                // 普通模式：打开会话
+                drawerLayout.closeDrawer(chatDrawerView);
+                enterChatMode(session.id());
+            }
+        });
+
+        // 长按进入选择模式
+        item.setOnLongClickListener(v -> {
+            if (!chatSelectMode && !isCurrentSession) {
+                toggleChatSelectMode();
+                checkBox.setChecked(true);
+            }
+            return true;
         });
 
         return item;
     }
 
+    private void toggleChatSelectMode() {
+        chatSelectMode = !chatSelectMode;
+        if (!chatSelectMode) {
+            selectedChatSessions.clear();
+        }
+        chatEditButton.setText(chatSelectMode ? "完成" : "删除");
+        chatDeleteButton.setVisibility(chatSelectMode ? View.VISIBLE : View.GONE);
+        newChatButton.setVisibility(chatSelectMode ? View.GONE : View.VISIBLE);
+        updateDeleteButton();
+        refreshChatHistoryList();
+    }
+
+    private void updateDeleteButton() {
+        int count = selectedChatSessions.size();
+        chatDeleteButton.setText(count > 0 ? "删除 (" + count + ")" : "删除");
+        chatDeleteButton.setAlpha(count > 0 ? 1f : 0.5f);
+    }
+
+    private void deleteSelectedChatSessions() {
+        Log.d(TAG, "deleteSelectedChatSessions: selectedChatSessions=" + selectedChatSessions);
+        if (selectedChatSessions.isEmpty()) {
+            Toast.makeText(this, "请先选择要删除的记录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Exit chat mode BEFORE the loop if the current session is being deleted.
+        // Calling exitChatMode inside the loop causes async animation conflicts.
+        if (isChatMode && selectedChatSessions.contains(chatSessionId)) {
+            exitChatMode();
+        }
+
+        int count = selectedChatSessions.size();
+        ChatSessionManager mgr = ChatSessionManager.getInstance(this);
+        for (int sessionId : selectedChatSessions) {
+            mgr.deleteSession(sessionId);
+        }
+        selectedChatSessions.clear();
+        toggleChatSelectMode();  // 退出选择模式
+        Toast.makeText(this, "已删除 " + count + " 条记录", Toast.LENGTH_SHORT).show();
+    }
+
     private int dpToPx(int dp) {
         return (int) TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics());
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (imageHandler != null) {
-            imageHandler.release();
-        }
     }
 }

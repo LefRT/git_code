@@ -3,34 +3,39 @@ package com.zuoyou.commentcollector.feature;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.TextView;
 
 /**
- * 音乐菜单弹窗 — 竖向歌曲列表 + 播放/暂停控制。
+ * 音乐面板 — 抽屉式侧滑面板，显示在角色图片正左边。
  * <p>
  * 纯代码构建（不额外 XML），白色圆角卡片风格。
- * 宽度 250dp，每行：封面小图 + 歌名 + 播放指示。
+ * 宽度 180dp，每行：封面小图 + 歌名（最多 4 字，超出跑马灯）+ 播放指示。
+ * <p>
+ * 不再使用 PopupWindow，而是构建一个 View 供外部添加到布局中，
+ * 通过 translationX 控制显隐（由 MainImageHandler 拖拽驱动）。
  */
 public class MusicMenuPopup {
 
-    private static final int WIDTH_DP = 250;
-    private static final int COVER_SIZE_DP = 36;
-    private static final int ITEM_HEIGHT_DP = 48;
-    private static final int PADDING_DP = 12;
+    private static final int WIDTH_DP = 180;
+    private static final int COVER_SIZE_DP = 32;
+    private static final int ITEM_HEIGHT_DP = 40;
+    private static final int PADDING_DP = 10;
+    private static final int MAX_TITLE_CHARS = 4;
 
     private final Activity activity;
     private final MusicPlayer musicPlayer;
-    private PopupWindow popupWindow;
+
+    private LinearLayout panelView;
     private LinearLayout listContainer;
-    private MusicPlayer.MusicListener popupListener;
+    private TextView modeBtn;
+    private MusicPlayer.MusicListener musicListener;
 
     public MusicMenuPopup(Activity activity) {
         this.activity = activity;
@@ -38,74 +43,109 @@ public class MusicMenuPopup {
     }
 
     /**
-     * 在指定锚点 View 旁边显示弹窗。
+     * 构建面板 View 并返回（仅构建一次）。
      */
-    public void show(View anchor) {
-        if (popupWindow != null && popupWindow.isShowing()) {
-            dismiss();
-            return;
-        }
+    public View getView() {
+        if (panelView != null) return panelView;
+        buildPanel();
+        return panelView;
+    }
 
+    /**
+     * 面板是否已构建。
+     */
+    public boolean isBuilt() {
+        return panelView != null;
+    }
+
+    /**
+     * 将面板添加到指定父布局。
+     */
+    public void attachTo(ViewGroup parent) {
+        if (panelView == null) buildPanel();
+        if (panelView.getParent() == null) {
+            parent.addView(panelView);
+        }
+    }
+
+    /**
+     * 释放资源（Activity.onDestroy 时调用）。
+     */
+    public void release() {
+        if (musicListener != null) {
+            musicPlayer.removeListener(musicListener);
+            musicListener = null;
+        }
+    }
+
+    // ─── 构建面板 ───
+
+    private void buildPanel() {
         int widthPx = dpToPx(WIDTH_DP);
         int paddingPx = dpToPx(PADDING_DP);
 
         // 根布局
-        LinearLayout root = new LinearLayout(activity);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(paddingPx, paddingPx, paddingPx, paddingPx);
+        panelView = new LinearLayout(activity);
+        panelView.setOrientation(LinearLayout.VERTICAL);
+        panelView.setPadding(paddingPx, paddingPx, paddingPx, paddingPx);
+        panelView.setElevation(dpToPx(8));
 
         // 圆角白色背景
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.WHITE);
         bg.setCornerRadius(dpToPx(12));
         bg.setStroke(dpToPx(1), 0xFFE0E8EE);
-        root.setBackground(bg);
+        panelView.setBackground(bg);
+
+        // 固定宽度
+        panelView.setLayoutParams(new LinearLayout.LayoutParams(
+                widthPx, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 标题行：标题（左）+ 模式按钮（右）
+        LinearLayout titleRow = new LinearLayout(activity);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setPadding(0, 0, 0, dpToPx(6));
+        panelView.addView(titleRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // 标题
         TextView title = new TextView(activity);
         title.setText("音乐");
-        title.setTextSize(16);
+        title.setTextSize(14);
         title.setTextColor(0xFF1A2A3A);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
-        title.setPadding(0, 0, 0, dpToPx(8));
-        root.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        titleRow.addView(title, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        // 模式切换按钮
+        modeBtn = new TextView(activity);
+        modeBtn.setTextSize(11);
+        modeBtn.setTextColor(0xFF7EB6D9);
+        modeBtn.setGravity(Gravity.CENTER);
+        modeBtn.setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(3));
+        GradientDrawable modeBtnBg = new GradientDrawable();
+        modeBtnBg.setColor(0x1A7EB6D9);
+        modeBtnBg.setCornerRadius(dpToPx(10));
+        modeBtn.setBackground(modeBtnBg);
+        titleRow.addView(modeBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        updateModeText();
 
         // 歌曲列表
         listContainer = new LinearLayout(activity);
         listContainer.setOrientation(LinearLayout.VERTICAL);
-        root.addView(listContainer, new LinearLayout.LayoutParams(
+        panelView.addView(listContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 播放/暂停按钮
-        TextView playPauseBtn = new TextView(activity);
-        playPauseBtn.setTextSize(14);
-        playPauseBtn.setTextColor(0xFFFFFFFF);
-        playPauseBtn.setGravity(Gravity.CENTER);
-        playPauseBtn.setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8));
-        GradientDrawable btnBg = new GradientDrawable();
-        btnBg.setColor(0xFF7EB6D9);
-        btnBg.setCornerRadius(dpToPx(20));
-        playPauseBtn.setBackground(btnBg);
-        LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        btnLp.topMargin = dpToPx(8);
-        btnLp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(playPauseBtn, btnLp);
-
-        // 构建歌曲列表
-        refreshSongList();
-
-        // 播放/暂停按钮逻辑
-        playPauseBtn.setOnClickListener(v -> {
-            musicPlayer.togglePlayPause();
-            updatePlayPauseText(playPauseBtn);
-            refreshSongList();
+        // 模式按钮逻辑
+        modeBtn.setOnClickListener(v -> {
+            musicPlayer.cyclePlayMode();
+            updateModeText();
         });
-        updatePlayPauseText(playPauseBtn);
 
-        // 监听播放状态变化（使用 addListener，dismiss 时移除）
-        popupListener = new MusicPlayer.MusicListener() {
+        // 监听播放状态变化
+        musicListener = new MusicPlayer.MusicListener() {
             @Override
             public void onSongChanged(MusicPlayer.SongInfo song) {
                 activity.runOnUiThread(() -> refreshSongList());
@@ -113,41 +153,26 @@ public class MusicMenuPopup {
 
             @Override
             public void onPlayStateChanged(boolean isPlaying) {
-                activity.runOnUiThread(() -> {
-                    updatePlayPauseText(playPauseBtn);
-                    refreshSongList();
-                });
+                activity.runOnUiThread(() -> refreshSongList());
+            }
+
+            @Override
+            public void onPlayModeChanged(MusicPlayer.PlayMode mode) {
+                activity.runOnUiThread(() -> updateModeText());
             }
         };
-        musicPlayer.addListener(popupListener);
+        musicPlayer.addListener(musicListener);
 
-        // 创建 PopupWindow
-        popupWindow = new PopupWindow(root, widthPx, ViewGroup.LayoutParams.WRAP_CONTENT, true);
-        popupWindow.setOutsideTouchable(true);
-        popupWindow.setElevation(dpToPx(8));
-
-        // 显示在锚点下方
-        popupWindow.showAsDropDown(anchor, 0, dpToPx(8));
+        // 构建歌曲列表
+        refreshSongList();
     }
 
-    /**
-     * 关闭弹窗。
-     */
-    public void dismiss() {
-        if (popupListener != null) {
-            musicPlayer.removeListener(popupListener);
-            popupListener = null;
-        }
-        if (popupWindow != null && popupWindow.isShowing()) {
-            popupWindow.dismiss();
-        }
-        popupWindow = null;
-    }
-
-    // ─── 内部 ───
+    // ─── 歌曲列表 ───
 
     private void refreshSongList() {
+        if (listContainer == null) return;
         listContainer.removeAllViews();
+
         MusicPlayer.SongInfo[] songs = musicPlayer.getAllSongs();
         int currentIdx = musicPlayer.getCurrentIndex();
 
@@ -168,7 +193,7 @@ public class MusicMenuPopup {
         LinearLayout item = new LinearLayout(activity);
         item.setOrientation(LinearLayout.HORIZONTAL);
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
+        item.setPadding(dpToPx(4), dpToPx(3), dpToPx(4), dpToPx(3));
         item.setMinimumHeight(itemHeightPx);
 
         // 点击背景
@@ -184,54 +209,63 @@ public class MusicMenuPopup {
         cover.setImageResource(song.coverResId());
         cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
         LinearLayout.LayoutParams coverLp = new LinearLayout.LayoutParams(coverSizePx, coverSizePx);
-        coverLp.rightMargin = dpToPx(10);
+        coverLp.rightMargin = dpToPx(8);
         item.addView(cover, coverLp);
 
-        // 歌名 + 歌手
-        LinearLayout textCol = new LinearLayout(activity);
-        textCol.setOrientation(LinearLayout.VERTICAL);
-        textCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
+        // 歌名（最多 4 字，超出跑马灯）
         TextView titleView = new TextView(activity);
-        titleView.setText(song.title());
-        titleView.setTextSize(14);
+        titleView.setTextSize(13);
         titleView.setTextColor(isCurrent ? 0xFF7EB6D9 : 0xFF1A2A3A);
         titleView.setTypeface(null, isCurrent ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         titleView.setMaxLines(1);
-        textCol.addView(titleView, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        titleView.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+        titleView.setMarqueeRepeatLimit(-1);  // 无限循环
+        titleView.setHorizontallyScrolling(true);
+        titleView.setSelected(true);  // 触发 marquee
+        titleView.setFocusable(true);
+        titleView.setFocusableInTouchMode(true);
 
-        TextView artistView = new TextView(activity);
-        artistView.setText(song.artist());
-        artistView.setTextSize(11);
-        artistView.setTextColor(0xFF6B8A9E);
-        artistView.setMaxLines(1);
-        textCol.addView(artistView, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // 截取前 4 个字显示，超出部分由 marquee 滚动
+        String fullTitle = song.title();
+        titleView.setText(fullTitle);
+        titleView.setMaxWidth(dpToPx(MAX_TITLE_CHARS * 14));  // 约 4 个字的宽度
 
-        item.addView(textCol);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        item.addView(titleView, titleLp);
 
         // 播放指示
         if (isCurrent) {
             TextView indicator = new TextView(activity);
-            indicator.setText(musicPlayer.isPlaying() ? "▶" : "❚❚");
-            indicator.setTextSize(14);
+            indicator.setText(musicPlayer.isPlaying() ? "❚❚" : "▶");
+            indicator.setTextSize(12);
             indicator.setTextColor(0xFF7EB6D9);
-            indicator.setPadding(dpToPx(8), 0, 0, 0);
+            indicator.setPadding(dpToPx(4), 0, 0, 0);
             item.addView(indicator);
         }
 
-        // 点击播放
+        // 点击：当前歌曲→暂停/恢复，其他歌曲→切歌
         item.setOnClickListener(v -> {
-            musicPlayer.play(song.index());
+            if (musicPlayer.getCurrentIndex() == song.index() && musicPlayer.isPlaying()) {
+                musicPlayer.pause();
+            } else {
+                musicPlayer.play(song.index());
+            }
             refreshSongList();
         });
 
         return item;
     }
 
-    private void updatePlayPauseText(TextView btn) {
-        btn.setText(musicPlayer.isPlaying() ? "⏸ 暂停" : "▶ 播放");
+    // ─── 更新 UI ───
+
+    private void updateModeText() {
+        if (modeBtn == null) return;
+        switch (musicPlayer.getPlayMode()) {
+            case SEQUENTIAL -> modeBtn.setText("🔁顺序");
+            case RANDOM -> modeBtn.setText("🔀随机");
+            case SINGLE_LOOP -> modeBtn.setText("🔂单曲");
+        }
     }
 
     private int dpToPx(int dp) {

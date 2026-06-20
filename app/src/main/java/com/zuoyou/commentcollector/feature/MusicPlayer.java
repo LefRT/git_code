@@ -2,11 +2,14 @@ package com.zuoyou.commentcollector.feature;
 
 import android.content.Context;
 import android.media.MediaPlayer;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.zuoyou.commentcollector.R;
 
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -48,12 +51,21 @@ public class MusicPlayer {
         public int rawResId()  { return rawResId; }
     }
 
+    /** 播放模式 */
+    public enum PlayMode {
+        SEQUENTIAL,   // 顺序播放
+        RANDOM,       // 随机播放
+        SINGLE_LOOP   // 单曲循环
+    }
+
     /** 播放状态监听器 */
     public interface MusicListener {
         /** 当前歌曲变化（null 表示停止） */
         void onSongChanged(SongInfo song);
         /** 播放/暂停状态变化 */
         void onPlayStateChanged(boolean isPlaying);
+        /** 播放模式变化 */
+        default void onPlayModeChanged(PlayMode mode) {}
     }
 
     // ─── 单例 ───
@@ -74,10 +86,13 @@ public class MusicPlayer {
     // ─── 状态 ───
 
     private Context appContext;
+    private Handler mainHandler;
     private MediaPlayer mediaPlayer;
     private final SongInfo[] songs = new SongInfo[SONG_COUNT];
     private int currentIndex = -1;  // -1 = 未选择
     private boolean initialized = false;
+    private PlayMode currentMode = PlayMode.SEQUENTIAL;
+    private final Random random = new Random();
     private final List<MusicListener> listeners = new CopyOnWriteArrayList<>();
 
     private MusicPlayer() {}
@@ -90,6 +105,7 @@ public class MusicPlayer {
     public synchronized void init(Context context) {
         if (initialized) return;
         this.appContext = context.getApplicationContext();
+        this.mainHandler = new Handler(Looper.getMainLooper());
         initSongList();
         initialized = true;
         Log.d(TAG, "初始化完成，歌曲数: " + SONG_COUNT);
@@ -119,11 +135,19 @@ public class MusicPlayer {
             return;
         }
 
-        // 切歌：释放旧的
-        if (currentIndex != songIndex) {
-            releasePlayer();
-            currentIndex = songIndex;
+        // 点击当前歌曲：暂停/恢复切换
+        if (songIndex == currentIndex && mediaPlayer != null) {
+            if (mediaPlayer.isPlaying()) {
+                pause();
+            } else {
+                resume();
+            }
+            return;
         }
+
+        // 切歌：释放旧的
+        releasePlayer();
+        currentIndex = songIndex;
 
         SongInfo song = songs[currentIndex];
         if (mediaPlayer == null) {
@@ -135,7 +159,13 @@ public class MusicPlayer {
                 }
                 mediaPlayer.setOnCompletionListener(mp -> {
                     Log.d(TAG, "播放完成: " + song.title());
-                    dispatchPlayStateChanged(false);
+                    // Post to main looper — completion fires on MediaPlayer's internal thread,
+                    // but playNext() needs a Looper for MediaPlayer.create() on some device ROMs.
+                    if (mainHandler != null) {
+                        mainHandler.post(() -> playNext());
+                    } else {
+                        playNext();
+                    }
                 });
                 mediaPlayer.setOnErrorListener((mp, what, extra) -> {
                     Log.e(TAG, "MediaPlayer 错误: what=" + what + ", extra=" + extra);
@@ -231,6 +261,58 @@ public class MusicPlayer {
         return songs.clone();
     }
 
+    // ─── 播放模式 ───
+
+    /**
+     * 切换播放模式：顺序 → 随机 → 单曲 → 顺序。
+     */
+    public synchronized void cyclePlayMode() {
+        switch (currentMode) {
+            case SEQUENTIAL -> currentMode = PlayMode.RANDOM;
+            case RANDOM -> currentMode = PlayMode.SINGLE_LOOP;
+            case SINGLE_LOOP -> currentMode = PlayMode.SEQUENTIAL;
+        }
+        Log.d(TAG, "播放模式: " + currentMode);
+        dispatchPlayModeChanged(currentMode);
+    }
+
+    /**
+     * 获取当前播放模式。
+     */
+    public synchronized PlayMode getPlayMode() {
+        return currentMode;
+    }
+
+    /**
+     * 播放下一首（根据播放模式决定）。
+     */
+    private synchronized void playNext() {
+        if (currentIndex < 0) return;
+
+        int nextIndex;
+        switch (currentMode) {
+            case SINGLE_LOOP:
+                nextIndex = currentIndex;
+                break;
+            case RANDOM:
+                do {
+                    nextIndex = random.nextInt(SONG_COUNT);
+                } while (nextIndex == currentIndex && SONG_COUNT > 1);
+                break;
+            case SEQUENTIAL:
+            default:
+                nextIndex = (currentIndex + 1) % SONG_COUNT;
+                break;
+        }
+
+        Log.d(TAG, "自动下一首: " + songs[nextIndex].title() + " (模式=" + currentMode + ")");
+
+        // 释放当前 MediaPlayer，重置索引，让 play() 认为是新歌
+        releasePlayer();
+        currentIndex = -1;
+        play(nextIndex);
+    }
+
     // ─── 生命周期 ───
 
     /**
@@ -288,6 +370,12 @@ public class MusicPlayer {
     private void dispatchPlayStateChanged(boolean isPlaying) {
         for (MusicListener l : listeners) {
             l.onPlayStateChanged(isPlaying);
+        }
+    }
+
+    private void dispatchPlayModeChanged(PlayMode mode) {
+        for (MusicListener l : listeners) {
+            l.onPlayModeChanged(mode);
         }
     }
 }

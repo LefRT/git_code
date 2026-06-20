@@ -86,15 +86,16 @@ app/src/main/java/com/zuoyou/commentcollector/
 ├── AiService.java               # DeepSeek API client (comment evaluation, retry + cancel safety)
 ├── FloatingWindowService.java   # System overlay — bubble / comment list / evaluation card
 ├── SettingsActivity.java        # Accessibility service toggle + API key config
-├── MainActivity.java            # Launcher — DrawerLayout with service controls + chat history + memory toggle
+├── MainActivity.java            # Launcher — DrawerLayout + 内嵌聊天 + 服务控制 + 聊天记录管理
 └── feature/
-    ├── ChatActivity.java        # 全屏聊天界面 — RecyclerView + 消息气泡 + 打字指示器
+    ├── ChatActivity.java        # 全屏聊天界面（保留，侧边栏历史记录仍可跳转）
+    ├── ChatAdapter.java         # 聊天消息适配器（独立类，3 种 viewType）
     ├── ChatAiService.java       # 聊天 AI 服务 — 完整对话历史 + 记忆上下文注入
-    ├── ChatSessionManager.java  # JSON 文件持久化聊天记录（索引 + 会话文件）
-    ├── MainImageHandler.java    # 主界面手势 — 双击→动画→聊天，左滑→音乐菜单
+    ├── ChatSessionManager.java  # JSON 文件持久化聊天记录（单例，索引 + 会话文件）
+    ├── MainImageHandler.java    # 主界面手势 — 双击→内嵌聊天，拖拽→音乐面板，支持聊天模式
     ├── AnimationPlayer.java     # MP4 片头动画 — SurfaceView 覆盖层播放
-    ├── MusicPlayer.java         # 音乐播放器 — MediaPlayer 单例 + 多监听器 + 封面联动
-    ├── MusicMenuPopup.java      # 音乐菜单弹窗 — PopupWindow 歌曲列表
+    ├── MusicPlayer.java         # 音乐播放器 — MediaPlayer 单例 + 多监听器 + 封面联动 + 播放模式
+    ├── MusicMenuPopup.java      # 音乐面板 — 抽屉式侧滑面板（View，非 PopupWindow）
     └── MemoryCollector.java     # 记忆收集器 — 采集视频简介 + 高赞评论 → AI 上下文注入
 
 app/src/test/java/com/zuoyou/commentcollector/
@@ -222,7 +223,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 | 2 | MediaProjection (screen capture) | ✅ Done |
 | 3 | Context Builder (fuse text + vision via ring buffers) | ✅ Done |
 | 4 | AI service + floating window (comment list + evaluation) | ✅ Done |
-| 2+ | AI Chat + Music Player + Animation + Memory | ✅ Done (UI待调) |
+| 2+ | AI Chat + Music Player + Animation + Memory | ✅ Done |
 | 5 | Physical robot (ESP32-S3) | ❌ Pending |
 
 ### Optimization history (2026-06-16)
@@ -297,6 +298,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 - AccessibilityService bound with `BIND_ACCESSIBILITY_SERVICE`
 - FloatingWindowService 声明 `<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE">` — Android 14+
 - `ChatActivity` — `android:exported="false"`, `android:theme="@style/Theme.ZuoYou"`
+- `MainActivity` — `android:windowSoftInputMode="adjustPan"`（键盘弹出时上推窗口）
 
 ## Accessibility Config (`accessibility_service_config.xml`)
 
@@ -368,7 +370,7 @@ MiSS,我有六万存款，月薪七千，能结婚不,昨天19:09, · 广东,回
 | `ZuoYouContext` | ContextBuilder | 融合上下文 JSON 输出 |
 | `ZuoYouAI` | AiService | AI 调用日志（配置、请求、响应） |
 | `ZuoYouFloat` | FloatingWindowService | 悬浮窗生命周期与交互日志 |
-| `ZuoYouMain` | MainActivity | 主界面 + 侧边栏操作日志 |
+| `ZuoYouMain` | MainActivity | 主界面 + 内嵌聊天 + 侧边栏操作日志 |
 
 ## Phase 4: AI Service + Floating Window
 
@@ -484,10 +486,11 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 
 ### 主界面手势（MainImageHandler）
 
-- **双击角色图片** → 播放 MP4 片头动画（AnimationPlayer）→ 动画完成进入聊天（ChatActivity）
-- **左滑角色图片**（velocityX < -1000）→ 弹出音乐菜单（MusicMenuPopup）
+- **双击角色图片** → 图片上移缩小 + 聊天 UI 从底部滑入（内嵌在 MainActivity，无 Activity 跳转）
+- **向右拖拽角色图片** → 抽屉式拉出音乐面板（MusicMenuPopup），图片缩小+右移让出空间
+- **从图片左边缘右滑** → 打开左侧聊天记录抽屉
 - 防重入：动画播放中忽略双击
-- 角色图片 ImageView 引用缓存在构造函数中（不使用 `content.getChildAt(0)`，避免拿到 DrawerLayout）
+- 支持聊天模式：`setChatMode()` 通知 handler 当前 scale 和 pivot，拖拽和面板跟随图片位置
 
 ### AI 聊天（ChatActivity + ChatAiService）
 
@@ -503,8 +506,9 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 - 历史消息上限：`Constants.CHAT_HISTORY_MAX_MESSAGES`（40 条），避免超出 API token 限制
 - 使用共享 `Constants.SYSTEM_PROMPT`（不再重复定义）
 
-**ChatSessionManager** — JSON 文件持久化：
+**ChatSessionManager** — JSON 文件持久化（单例）：
 - 文件结构：`getFilesDir()/chats/chat_index.json` + `chat_N.json`
+- 双重检查锁定单例：`getInstance(Context)`，防止多实例互相覆盖索引
 - 所有公开方法 `synchronized` 保护线程安全
 - 内部记录：`ChatMessage(role, content, timestamp)` 和 `SessionInfo(id, preview, count, updatedAt)`
 
@@ -516,12 +520,25 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 - 封面联动：播放某首歌时通知所有监听器切换封面图
 - 5 首歌曲：`R.drawable.cover_01~05`（封面）+ `R.raw.song_01~05`（音频）
 - 方法：`init(context)`、`play(index)`、`pause()`、`resume()`、`stop()`、`togglePlayPause()`
+- **播放模式**：`PlayMode` 枚举（`SEQUENTIAL`/`RANDOM`/`SINGLE_LOOP`），`cyclePlayMode()` 循环切换
+- **自动切歌**：`onCompletionListener` → `playNext()` 根据当前模式决定下一首
+- **点击当前歌曲**：暂停/恢复切换（不再重新播放）
 
-**MusicMenuPopup** — PopupWindow 浮窗：
-- 纯代码构建（无 XML），白色圆角卡片风格
-- 歌曲列表：封面小图 + 歌名 + 歌手 + 播放指示（▶/❚❚）
-- 播放/暂停按钮
-- 使用 `addListener()`/`removeListener()` 模式，dismiss 时移除监听器
+**MusicMenuPopup** — 抽屉式侧滑面板：
+- 构建为普通 View（LinearLayout），通过 `attachTo(ViewGroup)` 添加到布局
+- 由 `MainImageHandler` 拖拽手势驱动 `translationX` 控制显隐
+- 宽度 180dp，白色圆角卡片风格
+- 歌曲列表：封面小图(32dp) + 歌名（最多 4 字，超出跑马灯滚动）+ 播放指示（▶/❚❚）
+- 标题行：左"音乐" + 右播放模式按钮（🔁顺序/🔀随机/🔂单曲）
+- 无底部播放/暂停按钮（通过点击歌曲项控制）
+- 使用 `addListener()`/`removeListener()` 模式，`release()` 时移除监听器
+
+**MainImageHandler** — 拖拽手势：
+- 双向拖拽：关闭状态向右拖→打开，打开状态向左拖→关闭
+- 拖拽进度映射：`progress(0~1)` 同时驱动图片 translationX+scale 和面板 translationX
+- 松手吸附：进度 ≥ 40% → 吸附到目标位置，否则弹回原位
+- 面板左侧留 8dp 间距，不紧贴屏幕边缘
+- 图片缩小比例：0.71f（280→200dp），最大右移：100dp
 
 ### 片头动画（AnimationPlayer）
 
@@ -548,10 +565,13 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 
 ### 左侧抽屉（聊天记录）
 
-- `activity_main.xml` 新增 `chatDrawerView`（左抽屉）
-- 显示聊天记录列表（序号 + 时间 + 预览 + 消息数）
-- "+ 新聊天" 按钮创建新会话
-- 点击已有会话打开 ChatActivity
+- `activity_main.xml` 新增 `chatDrawerView`（左抽屉，`layout_gravity="start"`）
+- 显示聊天记录列表（连续序号 + 时间 + 预览 + 消息数）
+- "+ 新聊天" 按钮创建新会话（内嵌聊天模式）
+- 点击已有会话加载历史消息（内嵌聊天模式）
+- 聊天界面顶栏"记录"按钮打开此抽屉
+- 支持多选删除：标题行"删除"按钮进入选择模式，CheckBox 多选，底部"删除 (N)"确认
+- 当前聊天会话不可删除（CheckBox 禁用 + 半透明）
 - `onResume()` 时刷新列表
 
 ### 右侧抽屉（记忆收集开关）
@@ -590,6 +610,36 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 | `MusicPlayer` | MusicPlayer | 音乐播放状态日志 |
 | `AnimationPlayer` | AnimationPlayer | 动画播放日志 |
 | `MemoryCollector` | MemoryCollector | 记忆采集日志 |
+
+## Music Module Redesign (2026-06-20) — 抽屉式交互 + 播放模式
+
+**交互重设计：**
+- 触发方式：左滑 fling → 右向拖拽（drag），像拉抽屉一样
+- 面板类型：PopupWindow → 普通 View（LinearLayout），translationX 控制显隐
+- 面板位置：图片下方 → 图片正左边（FrameLayout 绝对定位，gravity=CENTER_VERTICAL）
+- 布局结构：主内容 LinearLayout 外包一层 FrameLayout，面板作为其子元素
+- 关闭方式：双向拖拽（关闭→右拖打开，打开→左拖关闭）+ 松手吸附动画
+- 面板左侧留 8dp 间距，不紧贴屏幕边缘
+
+**面板缩小：**
+- 宽度：250dp → 180dp
+- 去掉歌手名显示
+- 歌曲名最多 4 字，超出 `TextUtils.TruncateAt.MARQUEE` 跑马灯滚动
+- 去掉底部播放/暂停按钮
+- 标题行：左"音乐" + 右播放模式按钮
+
+**播放模式（MusicPlayer.PlayMode）：**
+- `SEQUENTIAL`（顺序）→ `RANDOM`（随机）→ `SINGLE_LOOP`（单曲）→ 循环
+- `cyclePlayMode()` 切换，`MusicListener.onPlayModeChanged()` 回调
+- `playNext()` 在 `onCompletionListener` 中自动调用，根据模式决定下一首
+- 点击当前播放歌曲：暂停/恢复切换（不再重新播放）
+
+**MainImageHandler 拖拽逻辑：**
+- `ACTION_DOWN`：记录 startX + startProgress（isOpen ? 1.0 : 0.0）
+- `ACTION_MOVE`：双向拖拽，根据 isOpen 状态决定允许方向，线性映射 progress
+- `ACTION_UP`：progress ≥ 40% → 吸附到目标，否则弹回原位
+- 图片动画：translationX(0→100dp) + scale(1→0.71f)
+- 面板动画：translationX(隐藏→显示)
 
 ## Code Review Fixes (2026-06-19) — 15 findings + UI redesign
 
@@ -635,16 +685,21 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 - **Multi-listener**: Changed from single `volatile MusicListener` to `CopyOnWriteArrayList<MusicListener>` with `addListener()`/`removeListener()`. Prevents MusicMenuPopup from overwriting MainActivity's cover-image listener.
 - **Thread safety**: `isPlaying()` now `synchronized` — prevents NPE/ISE race with `release()`.
 - **Cleanup**: `release()` clears listener list.
+- **PlayMode**: `SEQUENTIAL`/`RANDOM`/`SINGLE_LOOP` with `cyclePlayMode()` and `playNext()` auto-advance.
+- **Click toggle**: `play()` now pauses/resumes when clicking the currently playing song.
 
 **MusicMenuPopup fixes:**
-- **Listener lifecycle**: Uses `addListener()` in `show()`, `removeListener()` in `dismiss()`. No longer permanently overwrites MainActivity's listener.
+- **Rewritten as View**: PopupWindow → LinearLayout View with `attachTo()`/`release()`.
+- **Listener lifecycle**: Uses `addListener()` in `buildPanel()`, `removeListener()` in `release()`. No longer permanently overwrites MainActivity's listener.
 
 **AnimationPlayer fixes:**
 - **sPlaying volatile**: Field made `volatile` for cross-thread visibility.
 - **sPlaying inside try**: `sPlaying = true` moved after `content.addView()` inside the try block. OOM during SurfaceView creation no longer leaves sPlaying stuck true.
 
 **MainImageHandler fixes:**
-- **Cached ImageView**: Constructor caches the `imageView` reference. `onDoubleTap()` and `onFling()` no longer use `content.getChildAt(0)` which returned DrawerLayout instead of ImageView.
+- **Rewritten for drag**: Replaced fling gesture with bidirectional drag (ACTION_DOWN/MOVE/UP tracking).
+- **MusicMenuPopup integration**: Receives MusicMenuPopup reference, controls panel translationX during drag.
+- **Cached ImageView**: Constructor caches the `imageView` reference. `onDoubleTap()` no longer uses `content.getChildAt(0)` which returned DrawerLayout instead of ImageView.
 
 **MemoryCollector fixes:**
 - **Thread safety**: All public methods `synchronized`. Prevents `ConcurrentModificationException` on LinkedHashMaps.
@@ -667,3 +722,98 @@ bg_button_primary.xml, bg_button_secondary.xml, bg_button_close.xml, bg_drawer_i
 - `API_TIMEOUT_MS` — shared OkHttp timeout (15000ms)
 - `CHAT_HISTORY_MAX_MESSAGES` — chat history cap (40 messages)
 - `KEY_MEMORY_ENABLED` — memory collection toggle key
+
+## Main UI Overhaul (2026-06-21) — 内嵌聊天 + 手势重设计
+
+### 主界面布局变更
+
+- **移除** App 名称 TextView（角色图片下方的文字）
+- **菜单按钮**移至屏幕右上角（`layout_gravity="end|top"`，margin 16dp），不再嵌套在图片容器内
+- **角色图片**居中显示（通过代码计算 `topMargin`，不使用 `gravity="center"`）
+- **聊天 UI** 内嵌在 `activity_main.xml` 的 `mainContentWrapper` FrameLayout 中，初始 INVISIBLE
+
+### 内嵌聊天模式（替代 Activity 跳转）
+
+双击角色图片后的动画序列（全部在 MainActivity 内完成，无 Activity 跳转）：
+
+1. 图片通过 `ValueAnimator` 修改 `topMargin` 上移至与菜单按钮顶部对齐（`statusBar + 16dp`）
+2. 同时 `scaleX/scaleY` 从 1.0 缩到 `CHAT_IMAGE_SCALE`（100/280 ≈ 0.357），`pivotY=0` 从顶部缩放
+3. 聊天容器 `translationY` 从屏幕底部动画到 0（由 `topMargin` 决定实际位置）
+4. `MainImageHandler.setChatMode(true, CHAT_IMAGE_SCALE)` 通知手势处理器
+
+返回动画（返回按钮或系统返回键）：
+- 聊天容器 `translationY` 滑出屏幕底部
+- 图片 `topMargin` 恢复居中位置，scale 恢复 1.0
+- `MainImageHandler.setChatMode(false, 1f)` 恢复默认
+
+**关键实现细节：**
+- `translationY` 不生效（被 `LinearLayout(gravity="center")` 覆盖）→ 改用 `ValueAnimator` 直接修改 `topMargin`
+- `gravity="center"` 会忽略 `topMargin` → 去掉 gravity，代码中手动计算居中 margin
+- MP4 动画暂跳过（`AnimationPlayer` 的 `prepareAsync` 回调可能不触发）
+
+### MainImageHandler 聊天模式支持
+
+- 新增 `setChatMode(boolean enabled, float baseScale)` 方法
+- 聊天模式下 `pivotX=0, pivotY=0`（缩放从左上角开始）
+- 拖拽时 `baseScale` 从 1.0 改为 `CHAT_IMAGE_SCALE`，在此基础上进一步缩小
+- 拖拽时保持 `topMargin` 不变（`ACTION_DOWN` 时保存，拖拽中恢复）
+- 音乐面板跟随图片当前位置（聊天模式下面板出现在缩小后的图片右侧）
+- 左边缘右滑打开抽屉：`ACTION_DOWN` 时检测是否在左边缘区域，`ACTION_MOVE` 时调用 `requestDisallowInterceptTouchEvent(false)` 让 DrawerLayout 接管
+
+### 聊天记录管理
+
+**多选删除：**
+- 聊天记录抽屉标题行右侧"删除"按钮，点击进入选择模式
+- 选择模式下每条记录左侧显示 CheckBox（独立 `setOnCheckedChangeListener`，不依赖父布局点击）
+- 点击行切换 CheckBox 状态（`setChecked(!isChecked)`）
+- 长按行直接进入选择模式并选中
+- 底部"删除 (N)"按钮显示已选数量，点击删除
+- 当前聊天会话的 CheckBox 禁用 + 半透明，不可删除
+- 选择模式下隐藏"+ 新聊天"，只显示"删除"确认按钮
+- 删除后自动退出选择模式
+
+**显示序号：** 用列表 `index+1` 作为连续序号，不用 `session.id()`（避免删除后序号跳跃）
+
+**ChatSessionManager 单例：** 改为双重检查锁定单例（`getInstance(Context)`），所有调用处统一使用，防止多个实例互相覆盖索引文件。
+
+### 键盘处理
+
+- `AndroidManifest.xml` 中 `MainActivity` 设置 `android:windowSoftInputMode="adjustPan"`
+- 键盘弹出时系统自动上推窗口，确保焦点输入框可见
+
+### 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `ChatAdapter.java` | 从 ChatActivity 提取的独立消息适配器（3 种 viewType） |
+
+## Code Review Fixes (2026-06-21) — 15 findings, 12 fixed
+
+**MainActivity 生命周期修复（4 个 Critical）：**
+- **MusicListener Activity 泄漏**：`onCreate()` 中注册的 `MusicListener` 存入 `musicListener` 字段，`onDestroy()` 中调用 `MusicPlayer.getInstance().removeListener(musicListener)`。防止旋转屏幕时旧 Activity 被 MusicPlayer 单例持有无法 GC。
+- **exitChatMode pivot snap**：`setChatMode(false, 1f)` 和 `isChatMode = false` 延迟到 `onAnimationEnd` 回调中执行。之前在动画开始前同步调用，导致 pivot 从 (0,0) 瞬间跳到 (center,center)，图片产生可见的位置跳变。
+- **ValueAnimator 不可取消**：`animateEnterChat()` 和 `exitChatMode()` 的 ValueAnimator 存入 `imageAnimator` 字段，`onDestroy()` 中调用 `imageAnimator.cancel()`。防止 Activity 销毁后动画继续操作已分离的 View。
+- **isChatMode 时序竞争**：`isChatMode = false` 从动画开始前移到 `onAnimationEnd` 中。配合 `isAnimating` 守卫，防止退出动画期间用户快速双击导致 `enterChatMode` 和 `exitChatMode` 的 `withEndAction` 互相覆盖 chatContainer 可见性。
+
+**MusicPlayer 修复（2 个）：**
+- **RANDOM 模式重复播放**：`playNext()` 中 `random.nextInt(SONG_COUNT)` 改为 `do { ... } while (nextIndex == currentIndex && SONG_COUNT > 1)`。之前有 20% 概率（5 首歌）重新播放当前歌曲。
+- **playNext 非 Looper 线程**：`onCompletionListener` 回调通过 `mainHandler.post(() -> playNext())` 投递到主线程。某些小米/EMUI 设备的 MediaPlayer 实现要求 `MediaPlayer.create()` 在有 Looper 的线程上调用。
+
+**ChatAiService 修复：**
+- **OkHttp Response 泄漏**：`onResponse()` 添加 `finally { response.close(); }`。之前只在取消路径关闭 Response，成功路径和异常路径均未关闭，导致 OkHttp 连接池泄漏。
+
+**ChatSessionManager 修复：**
+- **删除失败时孤立文件**：`deleteSession()` 仅在 `file.delete()` 成功时才从 `indexCache` 移除并保存索引。之前即使文件删除失败也会移除索引，导致 `chat_N.json` 永久孤立。
+
+**MainImageHandler 修复：**
+- **面板位置计算重复**：`applyDragProgress()` 和 `animateToProgress()` 中相同的 panel-position 计算逻辑提取为 `computePanelTranslationX(float progress)` 方法。防止修改一处遗漏另一处。
+
+**MainActivity 内嵌聊天修复（3 个）：**
+- **enterChatMode 阻止会话切换**：已在聊天模式时，`enterChatMode(differentSessionId)` 直接加载新会话数据（取消旧 AI 请求、清空消息、刷新适配器），无需先退出再重新进入。
+- **chatSessionId 竞争**：`sendChatMessage()` 中 `chatSessionId` 捕获为 `final int savedSessionId`，回调中使用 `savedSessionId` 持久化回复。同时回调仅在 `chatSessionId == savedSessionId` 时更新 UI，防止切换会话后旧回调污染新会话的 RecyclerView。
+- **deleteSelectedChatSessions 动画冲突**：`exitChatMode()` 移到循环之前调用（仅当当前会话被删除时），不再在循环内部调用。防止循环迭代和异步动画并发修改 UI 状态。
+
+**其他清理：**
+- 移除 `animateEnterChat()` 中未使用的 `float density` 局部变量
+- `onBackPressed()` 仍使用 deprecated API（targetSdk 36），风险低暂不处理
+- ChatActivity 与 MainActivity 内嵌聊天的代码重复需要更大规模重构（ChatController 提取），暂留 TODO

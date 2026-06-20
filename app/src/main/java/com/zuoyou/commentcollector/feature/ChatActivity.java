@@ -50,7 +50,7 @@ public class ChatActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        sessionManager = new ChatSessionManager(this);
+        sessionManager = ChatSessionManager.getInstance(this);
         aiService = new ChatAiService(this);
 
         // 获取 sessionId

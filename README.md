@@ -1,4 +1,4 @@
-# 左右
+# 可不 (KAFU)
 
 > 给 AI 一个实体化身，让 AI 不再只是手机里的软件。
 
@@ -8,28 +8,31 @@
 
 ### 核心体验流程
 
-1. 用户正在看内容
-2. AI 同步理解内容
-3. AI 发表观点、吐槽或调侃
-4. 实体机器人做出对应的表情和动作
+1. 用户正在刷抖音
+2. AI 实时理解评论区 + 屏幕画面
+3. AI 以「可不」的人格发表吐槽、共情或调侃
+4. 悬浮窗展示 AI 回复，用户可随时进入聊天对话
+5. （规划中）实体机器人做出对应的表情和动作
 
 ### 场景示例
 
-| 用户行为 | AI 语音/文字 | 机器人反馈 |
+| 用户行为 | 可不 (KAFU) | 机器人反馈 |
 |---------|-------------|-----------|
-| 刷抖音 | "评论区已经开始比视频精彩了。" | (¬‿¬) + 轻微摇头 |
+| 刷到搞笑视频 | "哈哈哈这个也太离谱了吧 XD" | (¬‿¬) + 轻微摇头 |
+| 看到 emo 评论 | "呜呜……抱抱你，会好起来的" | (´;ω;`) + 轻轻点头 |
+| 用户主动聊天 | "诶？你今天也刷到这个了呀～" | ^_^ + 歪头 |
 
 ---
 
 ## 项目定位
 
-### ❌ 第一阶段不考虑
+### ❌ 不考虑
 
 - 走路 / 导航 / 避障
 - 机械臂 / 自动跟随
 - 本地大模型部署
 
-### ✅ 第一阶段专注
+### ✅ 专注
 
 - 内容感知 → AI 理解 → 人格化表达
 - **核心理念：机器人只是 AI 的身体**
@@ -39,115 +42,164 @@
 ## 系统架构
 
 ```
-┌─────────────────────┐
-│     Android APP     │
-├─────────────────────┤
-│ • 内容感知层        │
-│ • Context Builder   │
-│ • AI 接口层         │
-│ • 悬浮窗交互        │
-└──────────┬──────────┘
-           │ WiFi 通信
-┌──────────▼──────────┐
-│     实体机器人      │
-├─────────────────────┤
-│ • 表情屏 (LCD/OLED) │
-│ • 舵机控制          │
-│ • 灯光系统          │
-└─────────────────────┘
+┌────────────────────┐     ┌─────────────────────┐
+│  Douyin App UI     │     │     Phone Screen    │
+│  (Accessibility)   │     │  (MediaProjection)  │
+└────────┬───────────┘     └──────────┬──────────┘
+         │ AccessibilityEvent         │ captureOnce() per tick
+┌────────▼───────────────────────────▼──────────┐
+│       DouyinCommentService (5s timer)          │
+│  ┌────────────────┐  ┌──────────────────────┐ │
+│  │ extractRecursive│  │ ScreenCaptureService  │ │
+│  │ parse + dedup  │  │ imageToBitmap + save  │ │
+│  └───────┬────────┘  └──────────┬───────────┘ │
+│          │                      │              │
+│  ┌───────▼──────────────────────▼───────────┐ │
+│  │         CommentDiffer.diff()              │ │
+│  │  three-state comparison + smart scoring   │ │
+│  └───────┬──────────────────────────────────┘ │
+│          │ bestComment.text()                 │
+│          ▼                                    │
+│  ┌──────────────────────────────────────────┐ │
+│  │         ContextBuilder (ring buffers)     │ │
+│  │  recentComments(max 5) + screenshots(5)  │ │
+│  │  + timeline(max 30) + videoDescription   │ │
+│  └───────┬──────────────────────────────────┘ │
+│          │                                    │
+│  ┌───────▼──────────────────────────────────┐ │
+│  │         MemoryCollector                   │ │
+│  │  video descriptions + high-like comments  │ │
+│  └──────────────────────────────────────────┘ │
+└──────────┬────────────────────────────────────┘
+           │ sendComment(text)
+┌──────────▼────────────────────────────────────┐
+│           AiService / ChatAiService            │
+│  SYSTEM_PROMPT (可不 KAFU persona)             │
+│  OkHttp POST → DeepSeek API                   │
+│  3x exponential backoff retry                  │
+│  Cancel safety + response close                │
+└──────────┬────────────────────────────────────┘
+           │ onAiResponse(text)
+┌──────────▼────────────────────────────────────┐
+│      FloatingWindowService                    │
+│  气泡态 (48dp) → 评论列表 → AI 评价卡片        │
+│  打字指示器 ··· + 自适应收回 2.5~12s           │
+└───────────────────────────────────────────────┘
 ```
 
 ---
 
-## 内容感知方案（核心）
+## 功能模块
 
-这是整个项目最重要的部分。
+### 内容感知层
 
-### 方案 A：AccessibilityService（无障碍服务）
+| 模块 | 说明 |
+|------|------|
+| `DouyinCommentService` | AccessibilityService — 5 秒定时器遍历评论树，三态 diff + 智能评分 |
+| `ScreenCaptureService` | MediaProjection 截帧，JPEG 80% 写入缓存，复用 Bitmap 缓冲区 |
+| `ContextBuilder` | 融合评论 + 截图 + 时间线 + 视频简介，环形缓冲区（线程安全） |
+| `CommentDiffer` | `NO_UPDATE` / `PARTIAL_UPDATE` / `FULL_UPDATE` 三态对比，去重 + 评分排序 |
+| `MemoryCollector` | 采集视频简介（≤5 条）和高赞评论（❤>50，≤20 条），JSON 持久化 |
 
-- **获取内容：** 应用名称、标题、评论区、弹幕、字幕、按钮文字、正文
-- **优点：** 速度快、耗电低、准确率高、无需 OCR
-- **缺点：** 无法识别视频画面本身
+### AI 服务层
 
-### 方案 B：MediaProjection（录屏接口）
+| 模块 | 说明 |
+|------|------|
+| `AiService` | 自动模式 — 定时器触发，内容哈希去重，指数退避重试（3 次），取消安全 |
+| `ChatAiService` | 聊天模式 — 完整对话历史 + 记忆上下文注入，单次请求不重试 |
+| `Constants.SYSTEM_PROMPT` | 可不 (KAFU) 角色设定 — 16-18 岁迷糊少女，天然呆、温柔、共情力强 |
 
-- **获取内容：** 整个屏幕的图像流
-- **优点：** 能看到视频画面、图片内容、游戏界面
-- **缺点：** 数据量大、分析成本高
+### 交互层
 
-### 最终方案：混合模式
+| 模块 | 说明 |
+|------|------|
+| `FloatingWindowService` | 悬浮窗三态 UI — 气泡 / 评论列表 / AI 评价卡片，自适应宽度 + 打字指示器 |
+| `MainActivity` | 主界面 — DrawerLayout + 内嵌聊天 + 聊天记录管理 + 服务控制 |
+| `MusicPlayer` | MediaPlayer 单例 — 5 首歌曲，播放模式（顺序/随机/单曲循环），封面联动 |
+| `MusicMenuPopup` | 抽屉式侧滑音乐面板 — 拖拽手势驱动，180dp 白色圆角卡片 |
+| `AnimationPlayer` | MP4 片头动画 — SurfaceView 覆盖层播放 |
+| `MainImageHandler` | 主界面手势 — 双击→内嵌聊天，拖拽→音乐面板，支持聊天模式 |
 
-| 模块 | 负责内容 |
-|------|---------|
-| Accessibility | 标题、评论、字幕、文本信息 |
-| MediaProjection | 视频画面、图片内容、视觉元素 |
-| Context Builder | 融合多模态信息 |
+### 聊天系统
+
+| 模块 | 说明 |
+|------|------|
+| `ChatActivity` | 全屏聊天界面（保留，侧边栏历史记录可跳转） |
+| `ChatAdapter` | 聊天消息适配器 — 3 种 viewType（用户/AI/打字指示器） |
+| `ChatSessionManager` | JSON 文件持久化 — 双重检查锁定单例，索引 + 会话文件 |
+
+### 数据层
+
+| 模块 | 说明 |
+|------|------|
+| `Comment` | Java 17 record — user, text, likeCount, time, location |
+| `AppContext` | 统一上下文 record + TimelineEvent |
+| `SecurePrefs` | EncryptedSharedPreferences 封装（AES-256-GCM） |
 
 ---
 
-## AI 部分
-
-- **部署方式：** 云端 API
-- **候选模型：** OpenAI API / DeepSeek API / Alibaba Cloud Qwen API
-- **核心任务：** 理解内容、生成吐槽、保持人格、维持上下文
-
-### AI 人格设计
+## AI 人格：可不 (KAFU)
 
 **定位：** 不是问答机器人，而是**旁观者 / 朋友 / 吐槽搭子**。
 
-| 场景 | 示例 |
-|------|------|
-| 看到学习视频 | "这次是真的学习，还是准备挂后台？" |
-| 看到猫咪翻车 | "我觉得它高估了自己的平衡能力。" |
-| 看到评论区 | "评论区已经开始接管比赛了。" |
+- 16-18 岁迷糊少女，天然呆、温柔、共情力强
+- 说话轻柔软糯，常用「えっ……？」、「そうなの？」
+- 接地气有网感，搞笑评论跟着笑，emo 评论温柔共情
+- 偶尔提及咖喱乌冬、音乐等个人爱好
+
+| 场景 | 可不的反应 |
+|------|-----------|
+| 看到搞笑视频 | "哈哈哈这个也太离谱了吧，我要笑死了 XD" |
+| 看到猫咪翻车 | "呜呜小猫咪你没事吧……它好像在装没事哈哈哈" |
+| 看到 emo 评论 | "抱抱你……会好起来的，今天也要好好吃饭哦" |
+| 用户主动聊天 | "诶？你也喜欢这首歌呀！我最近一直在单曲循环呢～" |
 
 ---
 
-## 实体机器人定位
+## 开发阶段
 
-机器人不是计算中心，主要负责**存在感、情绪表达、陪伴感**。
-
-### 第一版硬件规格
-
-- **主控：** ESP32-S3
-- **显示：** LCD/OLED 表情屏
-- **执行：** 1个舵机 + 灯光
-
-### 动作与表情库
-
-- **动作：** 点头、摇头、歪头
-- **表情：** ^_^ / O_O / -- / ¬‿¬ / ><
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| 1 | AccessibilityService → 评论提取 + 点赞数 | ✅ 完成 |
+| 2 | MediaProjection 屏幕截帧 | ✅ 完成 |
+| 3 | ContextBuilder 多模态融合 | ✅ 完成 |
+| 4 | AI 服务 + 悬浮窗交互 | ✅ 完成 |
+| 2+ | AI 聊天 + 音乐播放 + 片头动画 + 记忆收集 | ✅ 完成 |
+| 5 | 实体机器人（ESP32-S3 + LCD + 舵机） | ❌ 待开始 |
 
 ---
 
-## 开发阶段规划
+## 技术栈
 
-### Phase 1：验证 AI 陪看体验 ⭐最重要
-
-- **形态：** 无机器人，仅开发 APP
-- **流程：** 内容感知 → AI 理解 → 悬浮窗吐槽
-- **目标：** 证明"AI 陪看"这个体验本身是有趣的
-
-### Phase 2：增加实体机器人
-
-- 实现表情与动作的实时同步
-
-### Phase 3：增加人格系统
-
-- 长期记忆、固定口头禅、情绪状态、用户习惯记忆
+- **语言：** Java 17（record, text blocks, switch expressions）
+- **最低 SDK：** 21（Android 5.0）
+- **目标 SDK：** 36
+- **构建：** Gradle 8.14.4 + AGP 8.13.0
+- **依赖：** OkHttp 4.12.0, Security-Crypto 1.1.0-alpha06, Material 1.11.0
+- **AI API：** DeepSeek API（可配置为其他 OpenAI 兼容 API）
+- **测试：** JUnit 4.13（CommentParserTest — 25 个测试用例）
 
 ---
 
-## 当前开发优先级
+## 快速开始
 
-1. AccessibilityService
-2. MediaProjection
-3. Context Builder
-4. AI 人格系统
-5. 实体机器人
+```bash
+# 构建 Debug APK
+./gradlew assembleDebug
+
+# 安装到手机
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 查看日志
+adb logcat -s DouyinComment    # 评论提取
+adb logcat -s ZuoYouAI         # AI 服务
+adb logcat -s ChatAiService    # 聊天 AI
+adb logcat -s MusicPlayer      # 音乐播放
+adb logcat -s MemoryCollector  # 记忆收集
+```
 
 ---
 
 ## License
 
-待定
+MIT
