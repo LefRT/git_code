@@ -167,7 +167,7 @@ public class DouyinCommentService extends AccessibilityService {
             // 1. 提取当前评论列表 + 视频简介（在同一次遍历中完成）
             List<Comment> currentComments = extractComments(rootNode);
 
-            // 更新视频简介到 ContextBuilder
+            // 更新视频简介到 ContextBuilder（仅在非空时更新，保留上一轮简介供记忆收集器使用）
             if (!currentDescription.isEmpty()) {
                 contextBuilder.setVideoDescription(currentDescription);
             }
@@ -184,8 +184,11 @@ public class DouyinCommentService extends AccessibilityService {
                     Log.d(TAG, "评论无更新");
                     break;
 
-                case PARTIAL_UPDATE:
                 case FULL_UPDATE:
+                    // 全部评论都变了 → 用户滑到了新视频，通知记忆收集器
+                    MemoryCollector.signalVideoChange();
+                    // fall through
+                case PARTIAL_UPDATE:
                     List<Comment> newComments = diff.newComments();
                     Log.d(TAG, diff.status() + "，新增 " + newComments.size() + " 条评论");
 

@@ -76,6 +76,16 @@
             android:exported="false"
             android:theme="@style/Theme.ZuoYou" />
 
+        <!-- 日程秘书服务 -->
+        <service
+            android:name=".feature.ScheduleSecretaryService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Schedule secretary foreground service for proactive daily schedule reminders" />
+        </service>
+
         <!-- 聊天界面 -->
         <activity
             android:name=".feature.ChatActivity"

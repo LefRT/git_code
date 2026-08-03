@@ -124,6 +124,7 @@ public class AnimationPlayer {
      * 释放资源（Activity.onDestroy 时调用）。
      */
     public void release() {
+        Log.d(TAG, "release()");
         released = true;
         cleanup();
     }

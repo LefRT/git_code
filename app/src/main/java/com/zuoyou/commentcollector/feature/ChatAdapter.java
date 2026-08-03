@@ -22,9 +22,15 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.MessageViewHol
     public static final int TYPE_TYPING = 2;
 
     private final List<ChatSessionManager.ChatMessage> messages;
+    private boolean isSecretaryMode = false;
 
     public ChatAdapter(List<ChatSessionManager.ChatMessage> messages) {
         this.messages = messages;
+    }
+
+    /** 设置为秘书模式（气泡背景变灰） */
+    public void setSecretaryMode(boolean secretaryMode) {
+        this.isSecretaryMode = secretaryMode;
     }
 
     @NonNull
@@ -47,6 +53,12 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.MessageViewHol
     public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
         ChatSessionManager.ChatMessage msg = messages.get(position);
         holder.textView.setText(msg.content());
+
+        // 秘书模式：AI 气泡灰色背景
+        int viewType = getItemViewType(position);
+        if (isSecretaryMode && viewType == TYPE_AI) {
+            holder.itemView.setBackgroundResource(R.drawable.bg_chat_bubble_secretary);
+        }
     }
 
     @Override

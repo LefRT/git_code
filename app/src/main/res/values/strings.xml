@@ -33,4 +33,8 @@
     <string name="floating_window_disable">关闭悬浮窗</string>
     <string name="start_service">开启服务</string>
     <string name="stop_service">停止服务</string>
+
+    <!-- 日程秘书 -->
+    <string name="secretary_chat_title">📅 日程秘书</string>
+    <string name="secretary_service_notification">日程管理已就绪</string>
 </resources>

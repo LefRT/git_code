@@ -21,7 +21,7 @@
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:text="←"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:textColor="@color/text_primary"
             android:gravity="center"
             android:clickable="true"
@@ -33,7 +33,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/settings_title"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
             android:layout_marginStart="12dp" />
@@ -60,18 +60,18 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:background="@drawable/bg_card"
+                android:background="@drawable/bg_glass_card"
                 android:padding="20dp"
-                android:elevation="2dp">
+                android:elevation="1dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/settings_accessibility_title"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_hint"
-                    android:letterSpacing="0.05"
-                    android:layout_marginBottom="12dp" />
+                    android:letterSpacing="0.06"
+                    android:layout_marginBottom="14dp" />
 
                 <!-- 状态行 -->
                 <LinearLayout
@@ -92,7 +92,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="@string/settings_accessibility_status_off"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:textColor="@color/text_primary"
                         android:layout_marginStart="10dp" />
 
@@ -100,10 +100,10 @@
                     <TextView
                         android:id="@+id/settingsAccessButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
+                        android:layout_height="34dp"
                         android:background="@drawable/bg_button_secondary"
                         android:text="@string/settings_accessibility_goto"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textColor="@color/blue_primary"
                         android:textStyle="bold"
                         android:gravity="center"
@@ -116,10 +116,10 @@
                     <TextView
                         android:id="@+id/settingsAccessCloseButton"
                         android:layout_width="wrap_content"
-                        android:layout_height="36dp"
+                        android:layout_height="34dp"
                         android:background="@drawable/bg_button_close"
                         android:text="@string/settings_accessibility_close"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textColor="@color/text_on_primary"
                         android:textStyle="bold"
                         android:gravity="center"
@@ -137,18 +137,18 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:background="@drawable/bg_card"
+                android:background="@drawable/bg_glass_card"
                 android:padding="20dp"
                 android:layout_marginTop="14dp"
-                android:elevation="2dp">
+                android:elevation="1dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/settings_api_title"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_hint"
-                    android:letterSpacing="0.05"
+                    android:letterSpacing="0.06"
                     android:layout_marginBottom="16dp" />
 
                 <!-- API Key -->
@@ -156,18 +156,18 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/api_key_label"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginBottom="6dp" />
 
                 <EditText
                     android:id="@+id/apiKeyEdit"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="46dp"
                     android:background="@drawable/bg_input"
                     android:inputType="textPassword"
                     android:hint="@string/api_key_hint"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
                     android:paddingStart="16dp"
@@ -179,7 +179,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/api_base_url_label"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="14dp"
                     android:layout_marginBottom="6dp" />
@@ -187,11 +187,11 @@
                 <EditText
                     android:id="@+id/apiBaseUrlEdit"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="46dp"
                     android:background="@drawable/bg_input"
                     android:inputType="textUri"
                     android:hint="@string/api_base_url_hint"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
                     android:paddingStart="16dp"
@@ -203,7 +203,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/model_name_label"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginTop="14dp"
                     android:layout_marginBottom="6dp" />
@@ -211,11 +211,11 @@
                 <EditText
                     android:id="@+id/modelNameEdit"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="46dp"
                     android:background="@drawable/bg_input"
                     android:inputType="text"
                     android:hint="@string/model_name_hint"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
                     android:paddingStart="16dp"
@@ -226,10 +226,10 @@
                 <TextView
                     android:id="@+id/saveButton"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:background="@drawable/bg_save_button"
+                    android:layout_height="46dp"
+                    android:background="@drawable/bg_aurora_accent"
                     android:text="@string/save"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:textColor="@color/text_on_primary"
                     android:textStyle="bold"
                     android:gravity="center"

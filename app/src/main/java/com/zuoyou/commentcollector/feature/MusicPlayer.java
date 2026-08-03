@@ -1,6 +1,7 @@
 package com.zuoyou.commentcollector.feature;
 
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
@@ -95,6 +96,12 @@ public class MusicPlayer {
     private final Random random = new Random();
     private final List<MusicListener> listeners = new CopyOnWriteArrayList<>();
 
+    // ─── 异步播放状态 ───
+    /** 每次 play() 递增，用于检测过期的 onPrepared 回调 */
+    private int playGeneration = 0;
+    /** prepareAsync 是否正在进行中（防止在未就绪时调用 start） */
+    private boolean isPreparing = false;
+
     private MusicPlayer() {}
 
     // ─── 初始化 ───
@@ -135,8 +142,8 @@ public class MusicPlayer {
             return;
         }
 
-        // 点击当前歌曲：暂停/恢复切换
-        if (songIndex == currentIndex && mediaPlayer != null) {
+        // 点击当前歌曲：暂停/恢复切换（仅在已就绪时）
+        if (songIndex == currentIndex && mediaPlayer != null && !isPreparing) {
             if (mediaPlayer.isPlaying()) {
                 pause();
             } else {
@@ -148,41 +155,68 @@ public class MusicPlayer {
         // 切歌：释放旧的
         releasePlayer();
         currentIndex = songIndex;
+        final int generation = ++playGeneration;
 
         SongInfo song = songs[currentIndex];
-        if (mediaPlayer == null) {
+        try {
+            mediaPlayer = new MediaPlayer();
+            // 关闭 AssetFileDescriptor 避免原生 fd 泄漏
+            AssetFileDescriptor afd = appContext.getResources().openRawResourceFd(song.rawResId);
             try {
-                mediaPlayer = MediaPlayer.create(appContext, song.rawResId);
-                if (mediaPlayer == null) {
-                    Log.e(TAG, "MediaPlayer.create 返回 null，资源可能缺失: " + song.title());
-                    return;
-                }
-                mediaPlayer.setOnCompletionListener(mp -> {
-                    Log.d(TAG, "播放完成: " + song.title());
-                    // Post to main looper — completion fires on MediaPlayer's internal thread,
-                    // but playNext() needs a Looper for MediaPlayer.create() on some device ROMs.
-                    if (mainHandler != null) {
-                        mainHandler.post(() -> playNext());
-                    } else {
-                        playNext();
-                    }
-                });
-                mediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                    Log.e(TAG, "MediaPlayer 错误: what=" + what + ", extra=" + extra);
-                    releasePlayer();
-                    dispatchPlayStateChanged(false);
-                    return true;
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "创建 MediaPlayer 失败", e);
-                return;
+                mediaPlayer.setDataSource(afd);
+            } finally {
+                afd.close();
             }
+            isPreparing = true;
+            mediaPlayer.setOnPreparedListener(mp -> {
+                // Post 到主线程 + 代际校验，防止已释放的 MediaPlayer 被误操作
+                if (mainHandler != null) {
+                    mainHandler.post(() -> {
+                        synchronized (MusicPlayer.this) {
+                            if (generation != playGeneration) return; // 过期回调
+                            isPreparing = false;
+                            Log.d(TAG, "MediaPlayer prepared，开始播放: " + song.title());
+                            mp.start();
+                            dispatchSongChanged(song);
+                            dispatchPlayStateChanged(true);
+                        }
+                    });
+                } else {
+                    synchronized (MusicPlayer.this) {
+                        if (generation != playGeneration) return;
+                        isPreparing = false;
+                        mp.start();
+                        dispatchSongChanged(song);
+                        dispatchPlayStateChanged(true);
+                    }
+                }
+            });
+            mediaPlayer.setOnCompletionListener(mp -> {
+                Log.d(TAG, "播放完成: " + song.title());
+                // Post to main looper — completion fires on MediaPlayer's internal thread,
+                // but playNext() needs a Looper for MediaPlayer.create() on some device ROMs.
+                if (mainHandler != null) {
+                    mainHandler.post(() -> playNext());
+                } else {
+                    playNext();
+                }
+            });
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "MediaPlayer 错误: what=" + what + ", extra=" + extra);
+                synchronized (MusicPlayer.this) {
+                    isPreparing = false;
+                }
+                releasePlayer();
+                dispatchPlayStateChanged(false);
+                return true;
+            });
+            mediaPlayer.prepareAsync();
+            Log.d(TAG, "正在加载: " + song.title() + " - " + song.artist());
+        } catch (Exception e) {
+            Log.e(TAG, "创建 MediaPlayer 失败", e);
+            isPreparing = false;
+            releasePlayer();
         }
-
-        mediaPlayer.start();
-        Log.d(TAG, "播放: " + song.title() + " - " + song.artist());
-        dispatchSongChanged(song);
-        dispatchPlayStateChanged(true);
     }
 
     /**
@@ -200,7 +234,7 @@ public class MusicPlayer {
      * 恢复播放。
      */
     public synchronized void resume() {
-        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+        if (mediaPlayer != null && !isPreparing && !mediaPlayer.isPlaying()) {
             mediaPlayer.start();
             Log.d(TAG, "恢复播放");
             dispatchPlayStateChanged(true);
@@ -224,6 +258,9 @@ public class MusicPlayer {
     public synchronized void togglePlayPause() {
         if (mediaPlayer != null && mediaPlayer.isPlaying()) {
             pause();
+        } else if (isPreparing) {
+            // 正在加载中，忽略
+            Log.d(TAG, "MediaPlayer 加载中，忽略切换");
         } else if (currentIndex >= 0) {
             resume();
         } else {
@@ -348,6 +385,7 @@ public class MusicPlayer {
     }
 
     private void releasePlayer() {
+        isPreparing = false;
         if (mediaPlayer != null) {
             try {
                 if (mediaPlayer.isPlaying()) {

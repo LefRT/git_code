@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "fixed_items": [
+    {
+      "id": "10:30-11:30",
+      "start_time": "10:30",
+      "end_time": "11:30",
+      "planned_hours": 1.0,
+      "task_name": "背英语试卷单词",
+      "category": "学习",
+      "priority": 2
+    },
+    {
+      "id": "11:30-13:00",
+      "start_time": "11:30",
+      "end_time": "13:00",
+      "planned_hours": 1.5,
+      "task_name": "午饭 + 绝区零",
+      "category": "休息娱乐",
+      "priority": 1
+    },
+    {
+      "id": "13:00-17:00",
+      "start_time": "13:00",
+      "end_time": "17:00",
+      "planned_hours": 4.0,
+      "task_name": "写算法书上的算法题",
+      "category": "学习",
+      "priority": 2
+    },
+    {
+      "id": "17:00-18:30",
+      "start_time": "17:00",
+      "end_time": "18:30",
+      "planned_hours": 1.5,
+      "task_name": "晚饭 + 鸣潮",
+      "category": "休息娱乐",
+      "priority": 1
+    }
+  ],
+  "rotations": {
+    "周一": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "Java 学习视频", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "复习算法题", "category": "学习", "priority": 2}
+    ],
+    "周二": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "大创科研", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "读课外书", "category": "学习", "priority": 1}
+    ],
+    "周三": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "Java 学习视频", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "大创科研", "category": "学习", "priority": 2}
+    ],
+    "周四": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "复习算法题", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "读课外书", "category": "学习", "priority": 1}
+    ],
+    "周五": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "Java 学习视频", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "复习算法题", "category": "学习", "priority": 2}
+    ],
+    "周六": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "大创科研", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "读课外书", "category": "学习", "priority": 1}
+    ],
+    "周日": [
+      {"id": "rot1", "start_time": "18:30", "end_time": "22:00", "planned_hours": 3.5, "task_name": "Java 学习视频", "category": "学习", "priority": 2},
+      {"id": "rot2", "start_time": "22:00", "end_time": "02:00", "planned_hours": 4.0, "task_name": "大创科研", "category": "学习", "priority": 2}
+    ]
+  },
+  "dates": {
+    "start": "2026-07-28",
+    "end": "2026-08-10"
+  },
+  "dow_map": {
+    "1": "周一", "2": "周二", "3": "周三", "4": "周四",
+    "5": "周五", "6": "周六", "7": "周日"
+  }
+}

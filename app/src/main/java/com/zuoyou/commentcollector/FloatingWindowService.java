@@ -10,6 +10,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -134,6 +135,15 @@ public class FloatingWindowService extends Service {
 
     // ───── 服务生命周期 ─────
 
+    /** 返回带有当前主题配置的 Context，确保颜色资源正确加载 */
+    private Context getThemedContext() {
+        boolean dark = ThemeHelper.isDarkMode(this);
+        Configuration config = new Configuration(getResources().getConfiguration());
+        int nightMode = dark ? Configuration.UI_MODE_NIGHT_YES : Configuration.UI_MODE_NIGHT_NO;
+        config.uiMode = (config.uiMode & ~Configuration.UI_MODE_NIGHT_MASK) | nightMode;
+        return createConfigurationContext(config);
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -209,14 +219,16 @@ public class FloatingWindowService extends Service {
         bubbleArea.setLayoutParams(areaLp);
 
         // 外层发光环
+        Context themedCtx = getThemedContext();
         View glowRing = new View(this);
         FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(bubbleSizePx + dpToPx(8), bubbleSizePx + dpToPx(8));
         glowLp.gravity = Gravity.CENTER;
         glowRing.setLayoutParams(glowLp);
         GradientDrawable ringBg = new GradientDrawable();
         ringBg.setShape(GradientDrawable.OVAL);
-        ringBg.setColor(0x187EB6D9); // 冰蓝 10% 透明度
-        ringBg.setStroke(dpToPx(2), 0x407EB6D9);
+        int primaryColor = ContextCompat.getColor(themedCtx, R.color.blue_primary);
+        ringBg.setColor((primaryColor & 0x00FFFFFF) | 0x18000000); // 10% 透明度
+        ringBg.setStroke(dpToPx(2), (primaryColor & 0x00FFFFFF) | 0x40000000); // 25% 透明度
         glowRing.setBackground(ringBg);
         glowRing.setVisibility(View.VISIBLE);
         bubbleArea.addView(glowRing);
@@ -251,7 +263,7 @@ public class FloatingWindowService extends Service {
                     new android.graphics.drawable.Drawable[]{
                             bubbleBg,
                             new GradientDrawable(GradientDrawable.Orientation.BR_TL,
-                                    new int[]{0x187EB6D9, 0x00000000})
+                                    new int[]{0x185BA8C8, 0x00000000})
                     });
             bubbleView.setBackground(layers);
         }
@@ -312,16 +324,17 @@ public class FloatingWindowService extends Service {
      * 创建卡片容器（冰蓝主题 + 圆润卡片）。
      */
     private LinearLayout createCardContainer() {
+        Context themedCtx = getThemedContext();
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
         container.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
 
-        // 卡片背景 — 白色 + 冰蓝薄边框 + 圆角
+        // 卡片背景 — 玻璃态 + 主题自适应边框
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.RECTANGLE);
         bg.setCornerRadius(dpToPx(16));
-        bg.setColor(0xFFFFFFFF);
-        bg.setStroke(dpToPx(1), ContextCompat.getColor(this, R.color.floating_border));
+        bg.setColor(ContextCompat.getColor(themedCtx, R.color.floating_card_bg));
+        bg.setStroke(dpToPx(1), ContextCompat.getColor(themedCtx, R.color.floating_border));
         container.setBackground(bg);
         container.setElevation(dpToPx(12));
 
@@ -338,14 +351,14 @@ public class FloatingWindowService extends Service {
         avatarDot.setLayoutParams(avatarLp);
         GradientDrawable avatarBg = new GradientDrawable();
         avatarBg.setShape(GradientDrawable.OVAL);
-        avatarBg.setColor(ContextCompat.getColor(this, R.color.blue_primary));
+        avatarBg.setColor(ContextCompat.getColor(themedCtx, R.color.blue_primary));
         avatarDot.setBackground(avatarBg);
         titleRow.addView(avatarDot);
 
         // 标题文字
         titleText = new TextView(this);
         titleText.setTextSize(12);
-        titleText.setTextColor(ContextCompat.getColor(this, R.color.blue_primary));
+        titleText.setTextColor(ContextCompat.getColor(themedCtx, R.color.blue_primary));
         titleText.setTypeface(null, Typeface.BOLD);
         titleText.setPadding(0, 0, 0, 0);
         titleRow.addView(titleText);
@@ -375,7 +388,7 @@ public class FloatingWindowService extends Service {
 
         evaluationText = new TextView(this);
         evaluationText.setTextSize(14);
-        evaluationText.setTextColor(ContextCompat.getColor(this, R.color.floating_card_text));
+        evaluationText.setTextColor(ContextCompat.getColor(themedCtx, R.color.floating_card_text));
         evaluationText.setLineSpacing(dpToPx(5), 1);
         evaluationText.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -391,7 +404,7 @@ public class FloatingWindowService extends Service {
         for (int i = 0; i < 3; i++) {
             TextView dot = new TextView(this);
             dot.setTextSize(18);
-            dot.setTextColor(ContextCompat.getColor(this, R.color.blue_primary));
+            dot.setTextColor(ContextCompat.getColor(themedCtx, R.color.blue_primary));
             dot.setText("·");
             dot.setPadding(dpToPx(2), 0, dpToPx(2), 0);
             if (i > 0) dot.setAlpha(0.4f);
@@ -452,6 +465,7 @@ public class FloatingWindowService extends Service {
      * 单击 = 发送 AI 评价。
      */
     private View createCommentItem(Comment comment, int index) {
+        Context themedCtx = getThemedContext();
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.HORIZONTAL);
         item.setGravity(Gravity.CENTER_VERTICAL);
@@ -462,7 +476,7 @@ public class FloatingWindowService extends Service {
             View divider = new View(this);
             divider.setLayoutParams(new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 1));
-            divider.setBackgroundColor(0x087EB6D9); // 冰蓝 3% 透明度极淡分割线
+            divider.setBackgroundColor(0x085BA8C8); // 极光蓝绿 3% 透明度极淡分割线
             // 没法在 LinearLayout 中加 item 间的分隔线，用背景色暗示
         }
 
@@ -485,8 +499,8 @@ public class FloatingWindowService extends Service {
         GradientDrawable avatarBg = new GradientDrawable();
         avatarBg.setShape(GradientDrawable.OVAL);
         int[] avatarColors = {
-                0xFF7EB6D9, 0xFF5A9BC2, 0xFFB8D9EF,
-                0xFFA8D8EA, 0xFF8FC5E9, 0xFF6BB3D9
+                0xFF5BA8C8, 0xFF3D7A9A, 0xFF8ECDE6,
+                0xFF8EADD0, 0xFF7CBAD0, 0xFF5BAABE
         };
         int colorIdx = Math.abs(user.hashCode()) % avatarColors.length;
         avatarBg.setColor(avatarColors[colorIdx]);
@@ -502,7 +516,7 @@ public class FloatingWindowService extends Service {
         // 昵称行
         TextView nameText = new TextView(this);
         nameText.setTextSize(13);
-        nameText.setTextColor(ContextCompat.getColor(this, R.color.floating_card_text));
+        nameText.setTextColor(ContextCompat.getColor(themedCtx, R.color.floating_card_text));
         nameText.setTypeface(null, Typeface.BOLD);
         nameText.setSingleLine(true);
         nameText.setEllipsize(TextUtils.TruncateAt.END);
@@ -512,7 +526,7 @@ public class FloatingWindowService extends Service {
         // 点赞行（❤ 赞数）
         TextView likeText = new TextView(this);
         likeText.setTextSize(11);
-        likeText.setTextColor(ContextCompat.getColor(this, R.color.text_hint));
+        likeText.setTextColor(ContextCompat.getColor(themedCtx, R.color.text_hint));
         likeText.setText("❤ " + comment.likeCount());
         textArea.addView(likeText);
 

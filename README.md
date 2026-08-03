@@ -68,7 +68,7 @@
 │          │                                    │
 │  ┌───────▼──────────────────────────────────┐ │
 │  │         MemoryCollector                   │ │
-│  │  video descriptions + high-like comments  │ │
+│  │  videos(≤40) → descriptions + comments    │ │
 │  └──────────────────────────────────────────┘ │
 └──────────┬────────────────────────────────────┘
            │ sendComment(text)
@@ -99,7 +99,7 @@
 | `ScreenCaptureService` | MediaProjection 截帧，JPEG 80% 写入缓存，复用 Bitmap 缓冲区 |
 | `ContextBuilder` | 融合评论 + 截图 + 时间线 + 视频简介，环形缓冲区（线程安全） |
 | `CommentDiffer` | `NO_UPDATE` / `PARTIAL_UPDATE` / `FULL_UPDATE` 三态对比，去重 + 评分排序 |
-| `MemoryCollector` | 采集视频简介（≤5 条）和高赞评论（❤>50，≤20 条），JSON 持久化 |
+| `MemoryCollector` | 按视频分组采集简介（≤40 个视频）和高赞评论（❤>50，≤20 条/视频），JSON 持久化，支持删除 |
 
 ### AI 服务层
 
@@ -125,8 +125,21 @@
 | 模块 | 说明 |
 |------|------|
 | `ChatActivity` | 全屏聊天界面（保留，侧边栏历史记录可跳转） |
-| `ChatAdapter` | 聊天消息适配器 — 3 种 viewType（用户/AI/打字指示器） |
-| `ChatSessionManager` | JSON 文件持久化 — 双重检查锁定单例，索引 + 会话文件 |
+| `ChatAdapter` | 聊天消息适配器 — 3 种 viewType（用户/AI/打字指示器）+ 秘书模式 |
+| `ChatSessionManager` | JSON 文件持久化 — 双重检查锁定单例，索引 + 会话文件，支持置顶/类型标记 |
+
+### 日程秘书（Phase 6）
+
+| 模块 | 说明 |
+|------|------|
+| `ScheduleData` | 数据模型 — ScheduleItem / DailySchedule |
+| `ScheduleDataManager` | 单例 — 加载 assets 日程 JSON，按星期轮换生成当日计划 |
+| `ScheduleStateManager` | 状态机 + AlarmManager 调度 — PENDING → START_SENT → END_CHECK_SENT → ADJUSTING → COMPLETED |
+| `ScheduleSecretaryService` | 前台服务 — 闹钟驱动，主动发消息 + 弹通知，动态调整计划 |
+
+**核心理念**：可不（KAFU）切换为知性沉稳的秘书人格，按《暑期学习计划》自动管理每日日程。系统闹钟驱动 → 到点主动提醒 → 结束温柔回访 → 根据用户反馈 AI 动态调整后续计划。
+
+**秘书人格**：独立于日常 KAFU（迷糊少女）的知性大姐姐形象，温和理性带俏皮，不因执行偏差说教。
 
 ### 数据层
 
@@ -165,6 +178,7 @@
 | 3 | ContextBuilder 多模态融合 | ✅ 完成 |
 | 4 | AI 服务 + 悬浮窗交互 | ✅ 完成 |
 | 2+ | AI 聊天 + 音乐播放 + 片头动画 + 记忆收集 | ✅ 完成 |
+| 6 | 日程秘书 — 闹钟驱动每日管理 + AI 动态调整 | ✅ 完成 |
 | 5 | 实体机器人（ESP32-S3 + LCD + 舵机） | ❌ 待开始 |
 
 ---
@@ -196,6 +210,8 @@ adb logcat -s ZuoYouAI         # AI 服务
 adb logcat -s ChatAiService    # 聊天 AI
 adb logcat -s MusicPlayer      # 音乐播放
 adb logcat -s MemoryCollector  # 记忆收集
+adb logcat -s ScheduleSecretary # 日程秘书
+adb logcat -s ScheduleState     # 日程状态机
 ```
 
 ---

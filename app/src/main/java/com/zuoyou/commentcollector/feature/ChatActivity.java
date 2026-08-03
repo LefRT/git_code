@@ -3,16 +3,15 @@ package com.zuoyou.commentcollector.feature;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.LayoutInflater;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -36,7 +35,7 @@ public class ChatActivity extends AppCompatActivity {
     private ChatAiService aiService;
 
     private RecyclerView messageList;
-    private MessageAdapter adapter;
+    private ChatAdapter adapter;
     private EditText inputField;
     private TextView sendButton;
     private TextView titleView;
@@ -44,6 +43,8 @@ public class ChatActivity extends AppCompatActivity {
     private int sessionId = -1;
     private final List<ChatSessionManager.ChatMessage> messages = new ArrayList<>();
     private boolean waitingForReply = false;
+    private boolean sessionLoaded = false;
+    private boolean isSecretarySession = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,6 +63,10 @@ public class ChatActivity extends AppCompatActivity {
             Log.d(TAG, "加载会话 #" + sessionId);
         }
 
+        // 检测是否为秘书会话
+        checkSecretarySession();
+        ScheduleSecretaryService.setSecretaryChatVisible(isSecretarySession);
+
         // 初始化视图
         titleView = findViewById(R.id.chatTitle);
         messageList = findViewById(R.id.chatMessageList);
@@ -73,19 +78,31 @@ public class ChatActivity extends AppCompatActivity {
         backButton.setOnClickListener(v -> finish());
 
         // 标题
-        titleView.setText("可不 · 聊天 #" + sessionId);
+        titleView.setText(isSecretarySession ? "📅 日程秘书" : "可不 · 聊天 #" + sessionId);
+
+        // 秘书会话：灰色背景
+        if (isSecretarySession) {
+            View root = findViewById(android.R.id.content);
+            root.setBackgroundColor(ContextCompat.getColor(this, R.color.secretary_chat_bg));
+        }
 
         // 消息列表
-        adapter = new MessageAdapter();
+        adapter = new ChatAdapter(messages);
+        adapter.setSecretaryMode(isSecretarySession);
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(true);
         messageList.setLayoutManager(lm);
         messageList.setAdapter(adapter);
 
-        // 加载历史消息
-        messages.addAll(sessionManager.loadSession(sessionId));
-        adapter.notifyDataSetChanged();
-        scrollToBottom();
+        // 异步加载历史消息（避免主线程 I/O 阻塞）
+        sendButton.setEnabled(false);
+        sessionManager.loadSessionAsync(sessionId, loaded -> {
+            messages.addAll(loaded);
+            adapter.notifyDataSetChanged();
+            scrollToBottom();
+            sessionLoaded = true;
+            sendButton.setEnabled(true);
+        });
 
         // 发送按钮
         sendButton.setOnClickListener(v -> sendMessage());
@@ -100,12 +117,24 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
+    private void checkSecretarySession() {
+        List<ChatSessionManager.SessionInfo> sessions = sessionManager.getSessionList();
+        for (ChatSessionManager.SessionInfo s : sessions) {
+            if (s.id() == sessionId && "secretary".equals(s.type())) {
+                isSecretarySession = true;
+                break;
+            }
+        }
+    }
+
     private void sendMessage() {
         String text = inputField.getText().toString().trim();
-        if (TextUtils.isEmpty(text) || waitingForReply) return;
+        if (TextUtils.isEmpty(text) || waitingForReply || !sessionLoaded) return;
 
-        // 保存用户消息
-        sessionManager.saveMessage(sessionId, "user", text);
+        // 异步保存用户消息（不阻塞 UI）
+        sessionManager.saveMessageAsync(sessionId, "user", text, success -> {
+            if (!success) Log.e(TAG, "保存用户消息失败");
+        });
         messages.add(new ChatSessionManager.ChatMessage("user", text, ""));
         adapter.notifyItemInserted(messages.size() - 1);
         scrollToBottom();
@@ -126,8 +155,10 @@ public class ChatActivity extends AppCompatActivity {
                 // 移除打字指示器
                 removeTypingIndicator();
 
-                // 保存 AI 回复
-                sessionManager.saveMessage(sessionId, "assistant", reply);
+                // 异步保存 AI 回复
+                sessionManager.saveMessageAsync(sessionId, "assistant", reply, success -> {
+                    if (!success) Log.e(TAG, "保存 AI 回复失败");
+                });
                 messages.add(new ChatSessionManager.ChatMessage("assistant", reply, ""));
                 adapter.notifyItemInserted(messages.size() - 1);
                 scrollToBottom();
@@ -173,62 +204,11 @@ public class ChatActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        ScheduleSecretaryService.setSecretaryChatVisible(false);
         super.onDestroy();
         if (aiService != null) {
             aiService.cancel();
         }
     }
 
-    // ─── 消息适配器 ───
-
-    private static final int TYPE_USER = 0;
-    private static final int TYPE_AI = 1;
-    private static final int TYPE_TYPING = 2;
-
-    private class MessageAdapter extends RecyclerView.Adapter<MessageViewHolder> {
-
-        @NonNull
-        @Override
-        public MessageViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            LayoutInflater inflater = LayoutInflater.from(parent.getContext());
-            if (viewType == TYPE_USER) {
-                View v = inflater.inflate(R.layout.item_chat_user, parent, false);
-                return new MessageViewHolder(v);
-            } else if (viewType == TYPE_TYPING) {
-                View v = inflater.inflate(R.layout.item_chat_typing, parent, false);
-                return new MessageViewHolder(v);
-            } else {
-                View v = inflater.inflate(R.layout.item_chat_ai, parent, false);
-                return new MessageViewHolder(v);
-            }
-        }
-
-        @Override
-        public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
-            ChatSessionManager.ChatMessage msg = messages.get(position);
-            holder.textView.setText(msg.content());
-        }
-
-        @Override
-        public int getItemCount() {
-            return messages.size();
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            String role = messages.get(position).role();
-            if ("user".equals(role)) return TYPE_USER;
-            if ("typing".equals(role)) return TYPE_TYPING;
-            return TYPE_AI;
-        }
-    }
-
-    private static class MessageViewHolder extends RecyclerView.ViewHolder {
-        final TextView textView;
-
-        MessageViewHolder(View itemView) {
-            super(itemView);
-            textView = itemView.findViewById(R.id.messageText);
-        }
-    }
 }

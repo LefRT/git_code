@@ -13,6 +13,48 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
+        <!-- 深色模式星空背景（由代码控制可见性） -->
+        <com.zuoyou.commentcollector.feature.StarFieldView
+            android:id="@+id/starFieldView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <!-- ═══ 时段问候（浮层，不影响图片居中） ═══ -->
+        <LinearLayout
+            android:id="@+id/greetingContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal|top"
+            android:layout_marginTop="48dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp"
+            android:background="@drawable/bg_greeting"
+            android:elevation="2dp">
+
+            <TextView
+                android:id="@+id/greetingText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold"
+                android:gravity="center" />
+
+            <TextView
+                android:id="@+id/greetingMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:gravity="center" />
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -28,7 +70,7 @@
                 android:scaleType="centerCrop"
                 android:clipToOutline="true"
                 android:outlineProvider="background"
-                android:background="@drawable/bg_card" />
+                android:background="@drawable/bg_glass_card" />
 
         </LinearLayout>
 
@@ -59,13 +101,13 @@
             <!-- 顶栏（返回 + 标题） -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="52dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:paddingStart="4dp"
                 android:paddingEnd="16dp"
-                android:background="@color/bg_card"
-                android:elevation="2dp">
+                android:background="@color/glass_white"
+                android:elevation="1dp">
 
                 <ImageButton
                     android:id="@+id/chatBackButton"
@@ -82,7 +124,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="和可不聊天"
-                    android:textSize="16sp"
+                    android:textSize="15sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary"
                     android:layout_marginStart="8dp" />
@@ -90,15 +132,15 @@
                 <TextView
                     android:id="@+id/chatHistoryButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:background="@drawable/bg_button_primary"
                     android:text="记录"
                     android:textSize="12sp"
                     android:textColor="@color/text_on_primary"
                     android:textStyle="bold"
                     android:gravity="center"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
                     android:clickable="true"
                     android:focusable="true" />
             </LinearLayout>
@@ -118,9 +160,12 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:padding="12dp"
-                android:background="@color/bg_card"
-                android:elevation="4dp">
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="10dp"
+                android:background="@color/glass_white"
+                android:elevation="2dp">
 
                 <EditText
                     android:id="@+id/chatInput"
@@ -128,7 +173,7 @@
                     android:layout_height="44dp"
                     android:layout_weight="1"
                     android:hint="说点什么..."
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
                     android:background="@drawable/bg_chat_input"
@@ -144,12 +189,12 @@
                     android:layout_height="44dp"
                     android:background="@drawable/bg_button_primary"
                     android:text="发送"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@color/text_on_primary"
                     android:textStyle="bold"
                     android:gravity="center"
-                    android:paddingStart="20dp"
-                    android:paddingEnd="20dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
                     android:layout_marginStart="8dp"
                     android:clickable="true"
                     android:focusable="true" />
@@ -165,7 +210,7 @@
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:orientation="vertical"
-        android:background="@color/drawer_bg"
+        android:background="@drawable/bg_drawer_glass"
         android:elevation="8dp"
         android:paddingTop="48dp"
         android:paddingStart="16dp"
@@ -185,18 +230,18 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="聊天记录"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary" />
 
             <TextView
                 android:id="@+id/chatEditButton"
                 android:layout_width="wrap_content"
-                android:layout_height="32dp"
+                android:layout_height="30dp"
                 android:background="@drawable/bg_button_secondary"
                 android:text="删除"
-                android:textSize="12sp"
-                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
                 android:gravity="center"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
@@ -226,7 +271,7 @@
             android:layout_height="44dp"
             android:background="@drawable/bg_button_primary"
             android:text="+ 新聊天"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textColor="@color/text_on_primary"
             android:textStyle="bold"
             android:gravity="center"
@@ -241,7 +286,7 @@
             android:layout_height="44dp"
             android:background="@drawable/bg_button_close"
             android:text="删除选中"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textColor="@color/text_on_primary"
             android:textStyle="bold"
             android:gravity="center"
@@ -259,7 +304,7 @@
         android:layout_height="match_parent"
         android:layout_gravity="end"
         android:orientation="vertical"
-        android:background="@color/drawer_bg"
+        android:background="@drawable/bg_drawer_glass"
         android:elevation="8dp"
         android:paddingTop="48dp"
         android:paddingStart="16dp"
@@ -270,7 +315,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="服务控制"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             android:textColor="@color/text_primary"
             android:layout_marginBottom="20dp"
@@ -300,7 +345,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="悬浮窗 + 屏幕捕获"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:textStyle="bold"
                         android:textColor="@color/text_primary" />
 
@@ -309,18 +354,18 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="未开启"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:textColor="@color/text_hint"
-                        android:layout_marginTop="2dp" />
+                        android:layout_marginTop="3dp" />
                 </LinearLayout>
 
                 <TextView
                     android:id="@+id/drawerServiceToggle"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/bg_button_primary"
                     android:text="开启"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     android:textColor="@color/text_on_primary"
                     android:textStyle="bold"
                     android:gravity="center"
@@ -334,8 +379,8 @@
         <!-- 分割线 -->
         <View
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/drawer_divider"
+            android:layout_height="0.5dp"
+            android:background="@color/divider"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="8dp" />
 
@@ -354,7 +399,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="设置"
-                android:textSize="15sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary" />
 
@@ -362,16 +407,16 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="API 配置"
-                android:textSize="12sp"
+                android:textSize="11sp"
                 android:textColor="@color/text_hint"
-                android:layout_marginTop="2dp" />
+                android:layout_marginTop="3dp" />
         </LinearLayout>
 
         <!-- 分割线 -->
         <View
             android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/drawer_divider"
+            android:layout_height="0.5dp"
+            android:background="@color/divider"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="8dp" />
 
@@ -399,7 +444,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="记忆收集"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:textStyle="bold"
                         android:textColor="@color/text_primary" />
 
@@ -408,19 +453,82 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="关闭"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:textColor="@color/text_hint"
-                        android:layout_marginTop="2dp" />
+                        android:layout_marginTop="3dp" />
                 </LinearLayout>
 
                 <TextView
                     android:id="@+id/drawerMemoryToggle"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="30dp"
                     android:background="@drawable/bg_button_primary"
                     android:text="开启"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     android:textColor="@color/text_on_primary"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 分割线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0.5dp"
+            android:background="@color/divider"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- ═══ 深色模式开关 ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/selector_drawer_item"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="深色模式"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary" />
+
+                    <TextView
+                        android:id="@+id/drawerDarkModeStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="关闭"
+                        android:textSize="11sp"
+                        android:textColor="@color/text_hint"
+                        android:layout_marginTop="3dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/drawerDarkModeToggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:background="@drawable/bg_button_secondary"
+                    android:text="开启"
+                    android:textSize="11sp"
+                    android:textColor="@color/blue_primary"
                     android:textStyle="bold"
                     android:gravity="center"
                     android:paddingStart="14dp"

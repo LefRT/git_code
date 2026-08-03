@@ -1,40 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主色 — 冰蓝 -->
-    <color name="blue_primary">#7EB6D9</color>
-    <color name="blue_dark">#5A9BC2</color>
-    <color name="blue_light">#B8D9EF</color>
+    <!-- 主色 — 极光蓝绿 -->
+    <color name="blue_primary">#5BA8C8</color>
+    <color name="blue_dark">#3D7A9A</color>
+    <color name="blue_light">#8ECDE6</color>
+
+    <!-- 渐变色（按钮/气泡/保存） -->
+    <color name="gradient_button_center">#4A9BB5</color>
+    <color name="gradient_bubble_center">#6DB0C4</color>
+    <color name="gradient_bubble_end">#7CAAD0</color>
+    <color name="gradient_save_center">#6DB5C0</color>
+    <color name="gradient_save_end">#7CADD4</color>
+
+    <!-- 极光辅色 -->
+    <color name="aurora_lavender">#B8A9D4</color>
+    <color name="aurora_peach">#E8B4A0</color>
+    <color name="aurora_teal">#4A9BB5</color>
 
     <!-- 辅助色 -->
-    <color name="success_green">#4CAF50</color>
-    <color name="success_green_light">#66BB6A</color>
+    <color name="success_green">#5CB87A</color>
+    <color name="success_green_light">#7DCF96</color>
 
-    <!-- 背景色 -->
-    <color name="bg_page">#EDF4F8</color>
-    <color name="bg_card">#FFFFFF</color>
-    <color name="bg_input">#F0F6FA</color>
+    <!-- 背景色 — 深邃冰蓝底 -->
+    <color name="bg_page">#E8F0F5</color>
+    <color name="bg_card">#F5F9FC</color>
+    <color name="bg_input">#EDF3F8</color>
 
-    <!-- 文字色 -->
-    <color name="text_primary">#1A2A3A</color>
-    <color name="text_secondary">#6B8A9E</color>
-    <color name="text_hint">#A8C0D0</color>
+    <!-- 玻璃态 -->
+    <color name="glass_white">#F2F8FB</color>
+    <color name="glass_border">#C8DDE8</color>
+    <color name="glass_frost">#E8EFF4</color>
+
+    <!-- 文字色 — 更深沉的层次 -->
+    <color name="text_primary">#1B2D3B</color>
+    <color name="text_secondary">#5E7D90</color>
+    <color name="text_hint">#94B0C0</color>
     <color name="text_on_primary">#FFFFFF</color>
 
     <!-- 分隔线 -->
-    <color name="divider">#1A7EB6D9</color>
+    <color name="divider">#205BA8C8</color>
 
     <!-- 状态色 -->
-    <color name="status_active">#4CAF50</color>
-    <color name="status_inactive">#CCCCCC</color>
-    <color name="status_error">#FF5252</color>
+    <color name="status_active">#5CB87A</color>
+    <color name="status_inactive">#B8C8D4</color>
+    <color name="status_error">#E87474</color>
 
     <!-- 悬浮窗 -->
-    <color name="floating_card_bg">#FFFFFF</color>
-    <color name="floating_card_text">#1A2A3A</color>
-    <color name="floating_border">#7EB6D9</color>
+    <color name="floating_card_bg">#F0F6FA</color>
+    <color name="floating_card_text">#1B2D3B</color>
+    <color name="floating_border">#5BA8C8</color>
 
-    <!-- 侧边栏 -->
-    <color name="drawer_bg">#FFFFFF</color>
-    <color name="drawer_item_pressed">#1A7EB6D9</color>
-    <color name="drawer_divider">#E0E8EE</color>
+    <!-- 侧边栏 — 玻璃态 -->
+    <color name="drawer_bg">#F0F5F9</color>
+    <color name="drawer_item_pressed">#185BA8C8</color>
+    <color name="drawer_divider">#D0DDE6</color>
+
+    <!-- 按钮禁用态 -->
+    <color name="button_disabled">#B8C8D4</color>
+    <color name="button_disabled_text">#7A9AAC</color>
+
+    <!-- 日程秘书 -->
+    <color name="secretary_chat_bg">#ECEEF2</color>
+    <color name="secretary_bubble_bg">#E6E8EE</color>
 </resources>

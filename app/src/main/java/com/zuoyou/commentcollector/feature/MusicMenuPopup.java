@@ -12,6 +12,10 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.core.content.ContextCompat;
+
+import com.zuoyou.commentcollector.R;
+
 /**
  * 音乐面板 — 抽屉式侧滑面板，显示在角色图片正左边。
  * <p>
@@ -75,6 +79,7 @@ public class MusicMenuPopup {
         if (musicListener != null) {
             musicPlayer.removeListener(musicListener);
             musicListener = null;
+            android.util.Log.d("MusicMenuPopup", "release() — listener removed");
         }
     }
 
@@ -90,11 +95,11 @@ public class MusicMenuPopup {
         panelView.setPadding(paddingPx, paddingPx, paddingPx, paddingPx);
         panelView.setElevation(dpToPx(8));
 
-        // 圆角白色背景
+        // 圆角主题自适应背景
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.WHITE);
+        bg.setColor(ContextCompat.getColor(activity, R.color.glass_white));
         bg.setCornerRadius(dpToPx(12));
-        bg.setStroke(dpToPx(1), 0xFFE0E8EE);
+        bg.setStroke(dpToPx(1), ContextCompat.getColor(activity, R.color.glass_border));
         panelView.setBackground(bg);
 
         // 固定宽度
@@ -113,7 +118,7 @@ public class MusicMenuPopup {
         TextView title = new TextView(activity);
         title.setText("音乐");
         title.setTextSize(14);
-        title.setTextColor(0xFF1A2A3A);
+        title.setTextColor(ContextCompat.getColor(activity, R.color.text_primary));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         titleRow.addView(title, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -121,11 +126,11 @@ public class MusicMenuPopup {
         // 模式切换按钮
         modeBtn = new TextView(activity);
         modeBtn.setTextSize(11);
-        modeBtn.setTextColor(0xFF7EB6D9);
+        modeBtn.setTextColor(ContextCompat.getColor(activity, R.color.blue_primary));
         modeBtn.setGravity(Gravity.CENTER);
         modeBtn.setPadding(dpToPx(6), dpToPx(3), dpToPx(6), dpToPx(3));
         GradientDrawable modeBtnBg = new GradientDrawable();
-        modeBtnBg.setColor(0x1A7EB6D9);
+        modeBtnBg.setColor((ContextCompat.getColor(activity, R.color.blue_primary) & 0x00FFFFFF) | 0x1A000000);
         modeBtnBg.setCornerRadius(dpToPx(10));
         modeBtn.setBackground(modeBtnBg);
         titleRow.addView(modeBtn, new LinearLayout.LayoutParams(
@@ -198,7 +203,7 @@ public class MusicMenuPopup {
 
         // 点击背景
         GradientDrawable pressBg = new GradientDrawable();
-        pressBg.setColor(0x1A7EB6D9);
+        pressBg.setColor((ContextCompat.getColor(activity, R.color.blue_primary) & 0x00FFFFFF) | 0x1A000000);
         pressBg.setCornerRadius(dpToPx(8));
         item.setBackground(pressBg);
         item.setClickable(true);
@@ -215,7 +220,7 @@ public class MusicMenuPopup {
         // 歌名（最多 4 字，超出跑马灯）
         TextView titleView = new TextView(activity);
         titleView.setTextSize(13);
-        titleView.setTextColor(isCurrent ? 0xFF7EB6D9 : 0xFF1A2A3A);
+        titleView.setTextColor(ContextCompat.getColor(activity, isCurrent ? R.color.blue_primary : R.color.text_primary));
         titleView.setTypeface(null, isCurrent ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         titleView.setMaxLines(1);
         titleView.setEllipsize(TextUtils.TruncateAt.MARQUEE);
@@ -239,7 +244,7 @@ public class MusicMenuPopup {
             TextView indicator = new TextView(activity);
             indicator.setText(musicPlayer.isPlaying() ? "❚❚" : "▶");
             indicator.setTextSize(12);
-            indicator.setTextColor(0xFF7EB6D9);
+            indicator.setTextColor(ContextCompat.getColor(activity, R.color.blue_primary));
             indicator.setPadding(dpToPx(4), 0, 0, 0);
             item.addView(indicator);
         }

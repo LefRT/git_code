@@ -47,6 +47,7 @@ public class ChatAiService {
     private final OkHttpClient httpClient;
     private final SecurePrefs securePrefs;
     private volatile Call currentCall = null;
+    private String customSystemPrompt = null;  // null = 使用默认 KAFU 人格
 
     /** 回调接口 */
     public interface ChatCallback {
@@ -63,6 +64,13 @@ public class ChatAiService {
                 .writeTimeout(Constants.API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .build();
         this.securePrefs = new SecurePrefs(this.appContext);
+    }
+
+    /**
+     * 设置自定义系统提示词。设为 null 恢复默认 KAFU 人格。
+     */
+    public void setSystemPrompt(String prompt) {
+        this.customSystemPrompt = prompt;
     }
 
     /**
@@ -87,10 +95,10 @@ public class ChatAiService {
         // 构建消息数组
         JSONArray messages = new JSONArray();
         try {
-            // 1. system: KAFU 角色设定（使用共享常量）
+            // 1. system: 角色设定（使用自定义或默认 KAFU 人格）
             JSONObject sysMsg = new JSONObject();
             sysMsg.put("role", "system");
-            sysMsg.put("content", Constants.SYSTEM_PROMPT);
+            sysMsg.put("content", customSystemPrompt != null ? customSystemPrompt : Constants.SYSTEM_PROMPT);
             messages.put(sysMsg);
 
             // 2. system: 记忆上下文（如果开启）
@@ -180,7 +188,19 @@ public class ChatAiService {
 
                     if (!response.isSuccessful()) {
                         Log.e(TAG, "API 返回错误 " + code + ": " + responseBody);
-                        mainHandler.post(() -> callback.onError("API 错误 " + code));
+                        // 尝试解析 DeepSeek/OpenAI 兼容的错误响应体
+                        String errorMsg = "API 错误 " + code;
+                        try {
+                            JSONObject errObj = new JSONObject(responseBody).optJSONObject("error");
+                            if (errObj != null) {
+                                String msg = errObj.optString("message", "");
+                                if (!msg.isEmpty()) {
+                                    errorMsg = msg;
+                                }
+                            }
+                        } catch (JSONException ignored) {}
+                        String finalMsg = errorMsg;
+                        mainHandler.post(() -> callback.onError(finalMsg));
                         return;
                     }
 

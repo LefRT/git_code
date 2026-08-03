@@ -19,6 +19,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 聊天会话管理器 — JSON 文件读写聊天记录。
@@ -43,6 +45,11 @@ public class ChatSessionManager {
     private final File chatDir;
     private final SimpleDateFormat timeFormat =
             new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA);
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "ChatSessionIO");
+        t.setDaemon(true);
+        return t;
+    });
 
     // ─── 内部数据结构 ───
 
@@ -85,18 +92,31 @@ public class ChatSessionManager {
         private String preview;       // 最新一条消息的前 30 字
         private int count;            // 消息总数
         private String updatedAt;
+        private boolean pinned;       // 是否置顶
+        private String type;          // "normal" | "secretary"
 
         public SessionInfo(int id, String preview, int count, String updatedAt) {
+            this(id, preview, count, updatedAt, false, "normal");
+        }
+
+        public SessionInfo(int id, String preview, int count, String updatedAt,
+                           boolean pinned, String type) {
             this.id = id;
             this.preview = preview;
             this.count = count;
             this.updatedAt = updatedAt;
+            this.pinned = pinned;
+            this.type = type;
         }
 
         public int id()         { return id; }
         public String preview() { return preview; }
         public int count()      { return count; }
         public String updatedAt() { return updatedAt; }
+        public boolean pinned() { return pinned; }
+        public String type()    { return type != null ? type : "normal"; }
+        public void setPinned(boolean p) { pinned = p; }
+        public void setType(String t) { type = t; }
 
         public JSONObject toJson() throws JSONException {
             JSONObject obj = new JSONObject();
@@ -104,6 +124,8 @@ public class ChatSessionManager {
             obj.put("preview", preview);
             obj.put("count", count);
             obj.put("updated_at", updatedAt);
+            obj.put("pinned", pinned);
+            obj.put("type", type != null ? type : "normal");
             return obj;
         }
 
@@ -112,7 +134,9 @@ public class ChatSessionManager {
                     obj.optInt("id", 0),
                     obj.optString("preview", ""),
                     obj.optInt("count", 0),
-                    obj.optString("updated_at", "")
+                    obj.optString("updated_at", ""),
+                    obj.optBoolean("pinned", false),
+                    obj.optString("type", "normal")
             );
         }
     }
@@ -145,7 +169,14 @@ public class ChatSessionManager {
         Log.d(TAG, "初始化完成，已有 " + indexCache.size() + " 个会话，nextId=" + nextId);
     }
 
-    // ─── 公开方法 ───
+    // ─── 异步回调接口 ───
+
+    /** 异步操作结果回调（在主线程） */
+    public interface ResultCallback<T> {
+        void onResult(T result);
+    }
+
+    // ─── 公开方法（同步，保持向后兼容） ───
 
     /**
      * 创建新会话，返回会话 ID。
@@ -171,6 +202,10 @@ public class ChatSessionManager {
      * @return 消息列表，会话不存在时返回空列表
      */
     public synchronized List<ChatMessage> loadSession(int sessionId) {
+        return loadSessionInternal(sessionId);
+    }
+
+    private List<ChatMessage> loadSessionInternal(int sessionId) {
         File file = getSessionFile(sessionId);
         if (!file.exists()) {
             Log.w(TAG, "会话文件不存在: " + sessionId);
@@ -203,7 +238,7 @@ public class ChatSessionManager {
      */
     public synchronized void saveMessage(int sessionId, String role, String content) {
         // 加载现有消息
-        List<ChatMessage> messages = new ArrayList<>(loadSession(sessionId));
+        List<ChatMessage> messages = new ArrayList<>(loadSessionInternal(sessionId));
         String now = timeFormat.format(new Date());
         messages.add(new ChatMessage(role, content, now));
 
@@ -233,8 +268,31 @@ public class ChatSessionManager {
      */
     public synchronized List<SessionInfo> getSessionList() {
         List<SessionInfo> sorted = new ArrayList<>(indexCache);
-        sorted.sort((a, b) -> Integer.compare(b.id, a.id));
+        // 置顶优先，同组按 ID 降序
+        sorted.sort((a, b) -> {
+            if (a.pinned() != b.pinned()) return a.pinned() ? -1 : 1;
+            return Integer.compare(b.id, a.id);
+        });
         return Collections.unmodifiableList(sorted);
+    }
+
+    /**
+     * 获取或创建秘书会话。秘书会话 type="secretary"、pinned=true、不可删除。
+     * @return 秘书会话的 ID
+     */
+    public synchronized int getOrCreateSecretarySession() {
+        for (SessionInfo s : indexCache) {
+            if ("secretary".equals(s.type())) return s.id;
+        }
+        // 不存在则创建
+        int id = nextId++;
+        String now = timeFormat.format(new Date());
+        SessionInfo info = new SessionInfo(id, "📅 日程秘书", 0, now, true, "secretary");
+        indexCache.add(info);
+        saveIndex();
+        saveSessionFile(id, new ArrayList<>(), info);
+        Log.d(TAG, "创建秘书会话 #" + id);
+        return id;
     }
 
     /**
@@ -244,6 +302,13 @@ public class ChatSessionManager {
      * @return true 如果删除成功
      */
     public synchronized boolean deleteSession(int sessionId) {
+        // 秘书会话不可删除
+        SessionInfo info = findSession(sessionId);
+        if (info != null && "secretary".equals(info.type())) {
+            Log.w(TAG, "秘书会话不可删除");
+            return false;
+        }
+
         File file = getSessionFile(sessionId);
         boolean fileExists = file.exists();
         boolean deleted = !fileExists || file.delete();
@@ -260,6 +325,59 @@ public class ChatSessionManager {
             Log.w(TAG, "删除会话 #" + sessionId + " 失败: 文件无法删除 " + file.getAbsolutePath());
         }
         return deleted;
+    }
+
+    // ─── 异步方法（文件 I/O 在后台线程，回调在主线程） ───
+
+    private static final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /**
+     * 异步加载会话消息（后台线程读文件，主线程回调）。
+     */
+    public void loadSessionAsync(int sessionId, ResultCallback<List<ChatMessage>> callback) {
+        ioExecutor.execute(() -> {
+            List<ChatMessage> result;
+            synchronized (this) {
+                result = loadSessionInternal(sessionId);
+            }
+            List<ChatMessage> finalResult = result;
+            mainHandler.post(() -> callback.onResult(finalResult));
+        });
+    }
+
+    /**
+     * 异步保存消息（后台线程写文件，完成后主线程回调）。
+     */
+    public void saveMessageAsync(int sessionId, String role, String content, ResultCallback<Boolean> onDone) {
+        ioExecutor.execute(() -> {
+            boolean success = false;
+            try {
+                synchronized (this) {
+                    saveMessage(sessionId, role, content);
+                }
+                success = true;
+            } catch (Exception e) {
+                Log.e(TAG, "异步保存消息失败: session=" + sessionId, e);
+            }
+            if (onDone != null) {
+                boolean finalSuccess = success;
+                mainHandler.post(() -> onDone.onResult(finalSuccess));
+            }
+        });
+    }
+
+    /**
+     * 异步删除会话（后台线程删文件，主线程回调）。
+     */
+    public void deleteSessionAsync(int sessionId, ResultCallback<Boolean> callback) {
+        ioExecutor.execute(() -> {
+            boolean result;
+            synchronized (this) {
+                result = deleteSession(sessionId);
+            }
+            boolean finalResult = result;
+            mainHandler.post(() -> callback.onResult(finalResult));
+        });
     }
 
     // ─── 内部 ───
